@@ -41,9 +41,7 @@ jobs:
           echo "REPO_NAME=$REPO_NAME" >> $GITHUB_OUTPUT
 
       - name: Build
-        run: |
-          export REPO_NAME="${{ steps.repo-name.outputs.REPO_NAME }}"
-          npm run build:gh-pages
+        run: npm run build:gh-pages
         env:
           GITHUB_PAGES: true
           REPO_NAME: ${{ steps.repo-name.outputs.REPO_NAME }}

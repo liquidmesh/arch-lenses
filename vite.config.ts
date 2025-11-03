@@ -6,8 +6,10 @@ import { VitePWA } from 'vite-plugin-pwa'
 // For GitHub Pages: Set GITHUB_PAGES=true and REPO_NAME=your-repo-name
 // The base path should match your GitHub repository name
 const repoName = process.env.REPO_NAME || 'arch-lenses'
+const basePath = process.env.GITHUB_PAGES ? `/${repoName}/` : '/'
+
 export default defineConfig({
-  base: process.env.GITHUB_PAGES ? `/${repoName}/` : '/',
+  base: basePath,
   plugins: [
     react(),
     VitePWA({
@@ -20,7 +22,7 @@ export default defineConfig({
         theme_color: '#3c76b5',
         background_color: '#ffffff',
         display: 'standalone',
-        start_url: '/',
+        start_url: basePath,
         icons: [
           {
             src: '/pwa-192x192.png',

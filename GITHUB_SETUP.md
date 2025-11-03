@@ -20,23 +20,31 @@ git commit -m "Initial commit"
 5. **DO NOT** initialize with README, .gitignore, or license (we already have these)
 6. Click **"Create repository"**
 
-## Step 3: Connect and Push to GitHub
+## Step 3: Set Up Authentication
 
-GitHub will show you commands. Run these in your terminal:
+**⚠️ Important:** GitHub no longer supports password authentication. You must use either:
+- **SSH keys** (recommended) - See [GITHUB_AUTH.md](./GITHUB_AUTH.md) for setup
+- **Personal Access Token** - See [GITHUB_AUTH.md](./GITHUB_AUTH.md) for setup
+
+## Step 4: Connect and Push to GitHub
+
+After setting up authentication, run these commands:
 
 ```bash
-# Add your repository (replace YOUR_USERNAME with your GitHub username)
-git remote add origin https://github.com/YOUR_USERNAME/arch-lenses.git
+# Using SSH (recommended - if you set up SSH keys)
+git remote add origin git@github.com:liquidmesh/arch-lenses.git
 
-# Or if using SSH:
-# git remote add origin git@github.com:YOUR_USERNAME/arch-lenses.git
+# OR using HTTPS (if using Personal Access Token)
+# git remote add origin https://github.com/liquidmesh/arch-lenses.git
 
 # Push to GitHub
 git branch -M main
 git push -u origin main
 ```
 
-## Step 4: Update Repository Name in Config (if needed)
+**Note:** If you haven't set up authentication yet, see [GITHUB_AUTH.md](./GITHUB_AUTH.md) for detailed instructions.
+
+## Step 5: Update Repository Name in Config (if needed)
 
 If your GitHub repository name is **NOT** `arch-lenses`, update `vite.config.ts`:
 
@@ -52,15 +60,37 @@ Or set the environment variable when building:
 REPO_NAME=your-repo-name npm run build:gh-pages
 ```
 
-## Step 5: Enable GitHub Pages
+## Step 6: Enable GitHub Pages
+
+After pushing your code (Step 4), GitHub Pages will be automatically configured by the workflow. However, you may need to enable it:
+
+### Option A: Automatic (After First Push)
+
+1. Push your code first (see Step 4)
+2. The workflow will run automatically
+3. GitHub Pages should be automatically enabled
+
+### Option B: Manual Enable (If needed)
 
 1. Go to your repository on GitHub
 2. Click **Settings** → **Pages** (in the left sidebar)
-3. Under **"Source"**, select:
-   - **Source**: `GitHub Actions`
-4. Click **Save**
+3. If you see **"Source"** dropdown:
+   - Select **"GitHub Actions"** as the source
+   - Click **Save**
+4. If you only see domain options:
+   - The workflow might need to run first
+   - Go to the **Actions** tab
+   - Wait for the workflow to complete
+   - Then check Settings → Pages again
 
-## Step 6: Deploy
+### Option C: Via Actions Tab
+
+1. Go to **Actions** tab in your repository
+2. Click on the workflow run (should start automatically after push)
+3. If Pages isn't enabled, you'll see a prompt
+4. Or go to Settings → Pages after the first successful workflow run
+
+## Step 7: Deploy
 
 ### Automatic Deployment (Recommended)
 
@@ -76,7 +106,7 @@ git push origin main
 The workflow will:
 1. Build your app
 2. Deploy to GitHub Pages
-3. Your site will be live at: `https://YOUR_USERNAME.github.io/arch-lenses/`
+3. Your site will be live at: `https://liquidmesh.github.io/arch-lenses/`
 
 ### Manual Deployment
 

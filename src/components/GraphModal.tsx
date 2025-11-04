@@ -74,7 +74,7 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
 
   return (
     <Modal open={open} onClose={onClose} title="" fullScreen>
-      <div className="absolute top-2 left-0 right-0 z-10 flex justify-center">
+      <div className="absolute top-2 left-0 right-50 mx-auto flex justify-center">
         <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Architecture Relationship Diagram</h2>
       </div>
       <div className="absolute top-10 left-2 z-10 bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded px-2 py-1 text-sm flex items-center gap-3">
@@ -232,7 +232,7 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
               {n.secondaryArchitects.length > 0 && (
                 <foreignObject
                   x={n.x - layout.nodeWidth / 2 + 4}
-                  y={n.y - 14 + nameLines.length * 11 + (businessLines.length + techLines.length + primaryLines.length) * 9}
+                  y={n.y - 24 + nameLines.length * 11 + (businessLines.length + techLines.length + primaryLines.length) * 9}
                   width={layout.nodeWidth - 8}
                   height={16}
                 >
@@ -268,10 +268,10 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
   const padding = 16
   const availableW = Math.max(320, windowW - padding * 2)
   const availableH = Math.max(240, windowH - padding * 2)
-  const topOffset = 40
+  const topOffset = 30
   const nodeHeight = 70 // Increased for wrapped text
   const rowGap = 6
-  const colGap = 20
+  const colGap = 5
 
   const nodes: PositionedItem[] = []
   const positions = new Map<number, { x: number; y: number }>()
@@ -280,7 +280,7 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
   if (mode === 'columns') {
     const n = visibleLenses.length
     let colWidth = Math.floor((availableW - colGap * (n - 1)) / n)
-    colWidth = Math.max(180, colWidth)
+    colWidth = Math.max(160, colWidth)
 
     let maxRows = 0
     visibleLenses.forEach((l, idx) => {
@@ -307,7 +307,7 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     const contentH = topOffset + Math.max(1, maxRows) * (nodeHeight + rowGap) + padding
     const width = availableW
     const height = Math.max(availableH, contentH)
-    const nodeWidth = Math.min(220, Math.floor(colWidth * 0.9))
+    const nodeWidth = Math.min(200, Math.floor(colWidth * 0.9))
 
     return { width, height, nodes, positions, headers, nodeWidth, nodeHeight }
   } else {
@@ -319,7 +319,7 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
       const rowItems = items.filter(i => i.lens === l.key)
       maxCols = Math.max(maxCols, rowItems.length)
       
-      const headerHeight = 40
+      const headerHeight = 30
       headers.push({
         key: l.key as LensKey,
         label: l.label,
@@ -329,7 +329,7 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
         height: headerHeight
       })
       
-      const itemsPerRow = Math.max(1, Math.floor((availableW - padding * 2) / 220))
+      const itemsPerRow = Math.max(1, Math.floor((availableW - padding * 2) / 170))
       const itemWidth = Math.floor((availableW - padding * 2 - colGap * (itemsPerRow - 1)) / itemsPerRow)
       
       rowItems.forEach((it, colIdx) => {
@@ -345,7 +345,7 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     const contentH = visibleLenses.length * (nodeHeight + rowGap + 40) + padding
     const width = availableW
     const height = Math.max(availableH, contentH)
-    const nodeWidth = 200
+    const nodeWidth = 160
 
     return { width, height, nodes, positions, headers, nodeWidth, nodeHeight }
   }

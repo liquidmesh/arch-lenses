@@ -360,7 +360,7 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     const headerGap = 10 // Gap between header and items
     let currentY = 0
     
-    visibleLenses.forEach((l, rowIdx) => {
+    visibleLenses.forEach((l) => {
       const rowItems = items.filter(i => i.lens === l.key)
       
       // Calculate how many rows of items are needed for this lens

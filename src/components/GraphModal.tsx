@@ -19,6 +19,7 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
   const [hoveredItemId, setHoveredItemId] = useState<number | null>(null)
   const [fieldFilter, setFieldFilter] = useState<{ field: string; value: string } | null>(null)
   const [layoutMode, setLayoutMode] = useState<'columns' | 'rows'>('columns')
+  const [viewMode, setViewMode] = useState<'skillGaps' | 'tags' | 'summary'>('skillGaps')
   const [zoom, setZoom] = useState(1)
 
   useEffect(() => {
@@ -90,6 +91,28 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
     return p || { x: 0, y: 0 }
   }
 
+  // Generate color from tag string
+  function getTagColor(tag: string): string {
+    // Simple hash function to generate consistent colors
+    let hash = 0
+    for (let i = 0; i < tag.length; i++) {
+      hash = tag.charCodeAt(i) + ((hash << 5) - hash)
+    }
+    // Generate a color with good contrast
+    const hue = Math.abs(hash) % 360
+    return `hsl(${hue}, 70%, 85%)`
+  }
+
+  // Get border color for tag view
+  function getTagBorderColor(tag: string): string {
+    let hash = 0
+    for (let i = 0; i < tag.length; i++) {
+      hash = tag.charCodeAt(i) + ((hash << 5) - hash)
+    }
+    const hue = Math.abs(hash) % 360
+    return `hsl(${hue}, 70%, 50%)`
+  }
+
   return (
     <Modal open={open} onClose={onClose} title="" fullScreen>
       <div className="absolute top-2 left-0 right-50 mx-auto flex justify-center">
@@ -113,6 +136,18 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
           </div>
         )}
         <div className="ml-auto flex items-center gap-2">
+          <label className="flex items-center gap-1 text-xs">
+            <span className="mr-1">View:</span>
+            <select 
+              value={viewMode} 
+              onChange={e => setViewMode(e.target.value as 'skillGaps' | 'tags' | 'summary')}
+              className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+            >
+              <option value="skillGaps">Architecture coverage</option>
+              <option value="tags">Tags</option>
+              <option value="summary">Summary</option>
+            </select>
+          </label>
           <label className="flex items-center gap-1 text-xs">
             <input type="checkbox" checked={layoutMode === 'rows'} onChange={e => setLayoutMode(e.target.checked ? 'rows' : 'columns')} />
             Row layout
@@ -188,17 +223,40 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
           const businessLines = n.businessContact ? wrapText(n.businessContact, maxTextWidth, 10) : []
           const techLines = n.techContact ? wrapText(n.techContact, maxTextWidth, 10) : []
           const primaryLines = n.primaryArchitect ? wrapText(n.primaryArchitect, maxTextWidth, 10) : []
+          const descriptionLines = n.description ? wrapText(n.description, maxTextWidth, 9) : []
           
-          const hasSkillsGap = !!n.skillsGaps?.trim()
           const isSelected = selectedItemId === n.id
           const isHovered = hoveredItemId === n.id
           const isRelated = n.id !== undefined && relatedItemIds.has(n.id)
           const isActive = isSelected || isHovered || isRelated
-          const fillColor = hasSkillsGap ? (isActive ? "#fecaca" : "#fee2e2") : (isActive ? "#bfdbfe" : "#e0f2fe")
-          const strokeColor = hasSkillsGap ? (isActive ? "#dc2626" : "#ef4444") : (isActive ? "#2563eb" : "#3b82f6")
           
-          // Determine stroke width: thicker for hovered/selected, medium for related, thin for others
-          const strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
+          // Determine colors and stroke based on view mode
+          let fillColor: string
+          let strokeColor: string
+          let strokeWidth: number
+          
+          if (viewMode === 'tags') {
+            // Tags view: color by first tag, or default if no tags
+            if (n.tags.length > 0) {
+              fillColor = isActive ? getTagColor(n.tags[0]) : getTagColor(n.tags[0])
+              strokeColor = isActive ? getTagBorderColor(n.tags[0]) : getTagBorderColor(n.tags[0])
+            } else {
+              fillColor = isActive ? "#e5e7eb" : "#f3f4f6"
+              strokeColor = isActive ? "#9ca3af" : "#d1d5db"
+            }
+            strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
+          } else if (viewMode === 'summary') {
+            // Summary view: neutral colors
+            fillColor = isActive ? "#e0f2fe" : "#f0f9ff"
+            strokeColor = isActive ? "#0ea5e9" : "#38bdf8"
+            strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
+          } else {
+            // Skill Gaps view: original logic
+            const hasSkillsGap = !!n.skillsGaps?.trim()
+            fillColor = hasSkillsGap ? (isActive ? "#fecaca" : "#fee2e2") : (isActive ? "#bfdbfe" : "#e0f2fe")
+            strokeColor = hasSkillsGap ? (isActive ? "#dc2626" : "#ef4444") : (isActive ? "#2563eb" : "#3b82f6")
+            strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
+          }
           
           return (
             <g 
@@ -210,91 +268,232 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
             >
               <rect x={n.x - layout.nodeWidth / 2} y={n.y - layout.nodeHeight / 2} width={layout.nodeWidth} height={layout.nodeHeight} rx={6} ry={6} fill={fillColor} stroke={strokeColor} strokeWidth={strokeWidth} />
               
-              {/* Name (wrapped) */}
+              {/* Name (wrapped) - always shown */}
               {nameLines.map((line, idx) => (
-                <text key={`name-${idx}`} x={n.x} y={n.y - 22 + idx * 11} textAnchor="middle" className="fill-slate-800" style={{ fontSize: 12 }}>{line}</text>
+                <text key={`name-${idx}`} x={n.x} y={n.y - 22 + idx * 11} textAnchor="middle" className="fill-slate-800 dark:fill-slate-200" style={{ fontSize: 12 }}>{line}</text>
               ))}
               
-              {/* Business Contact (wrapped, clickable) */}
-              {businessLines.map((line, idx) => {
-                const baseY = n.y - 20 + nameLines.length * 11
-                return (
-                  <text
-                    key={`biz-${idx}`}
-                    x={n.x}
-                    y={baseY + idx * 9}
-                    textAnchor="middle"
-                    className="fill-blue-600 hover:underline"
-                    style={{ fontSize: 10, cursor: 'pointer' }}
-                    onClick={(e) => handleFieldClick(e, 'businessContact', n.businessContact || '')}
-                  >
-                    {line}
-                  </text>
-                )
-              })}
-              
-              {/* Tech Contact (wrapped, clickable) */}
-              {techLines.map((line, idx) => {
-                const baseY = n.y - 18 + nameLines.length * 11 + businessLines.length * 9
-                return (
-                  <text
-                    key={`tech-${idx}`}
-                    x={n.x}
-                    y={baseY + idx * 9}
-                    textAnchor="middle"
-                    className="fill-blue-600 hover:underline"
-                    style={{ fontSize: 10, cursor: 'pointer' }}
-                    onClick={(e) => handleFieldClick(e, 'techContact', n.techContact || '')}
-                  >
-                    {line}
-                  </text>
-                )
-              })}
-              
-              {/* Primary Architect (wrapped, clickable) */}
-              {primaryLines.map((line, idx) => {
-                const baseY = n.y - 16 + nameLines.length * 11 + (businessLines.length + techLines.length) * 9
-                return (
-                  <text
-                    key={`primary-${idx}`}
-                    x={n.x}
-                    y={baseY + idx * 9}
-                    textAnchor="middle"
-                    className="fill-blue-600 hover:underline"
-                    style={{ fontSize: 10, cursor: 'pointer' }}
-                    onClick={(e) => handleFieldClick(e, 'primaryArchitect', n.primaryArchitect || '')}
-                  >
-                    {line}
-                  </text>
-                )
-              })}
-              
-              {/* Secondary Architects - show first names only, make each clickable */}
-              {n.secondaryArchitects.length > 0 && (
-                <foreignObject
-                  x={n.x - layout.nodeWidth / 2 + 4}
-                  y={n.y - 24 + nameLines.length * 11 + (businessLines.length + techLines.length + primaryLines.length) * 9}
-                  width={layout.nodeWidth - 8}
-                  height={16}
-                >
-                  <div style={{ fontSize: 10, textAlign: 'center', wordWrap: 'break-word' }}>
-                    {n.secondaryArchitects.map((arch, idx) => (
-                      <span key={idx}>
-                        <span
-                          className="text-grey-600 hover:underline cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setFieldFilter({ field: 'secondaryArchitects', value: arch.trim() })
-                            setSelectedItemId(null)
-                          }}
+              {viewMode === 'summary' && (
+                <>
+                  {/* Description (wrapped) - always shown */}
+                  {descriptionLines.map((line, idx) => {
+                    const baseY = n.y - 22 + nameLines.length * 11 + 4
+                    return (
+                      <text
+                        key={`desc-${idx}`}
+                        x={n.x}
+                        y={baseY + idx * 8}
+                        textAnchor="middle"
+                        className="fill-slate-700 dark:fill-slate-300"
+                        style={{ fontSize: 9 }}
+                      >
+                        {line}
+                      </text>
+                    )
+                  })}
+                  
+                  {/* Business Contact, Tech Contact, Primary Architect, Secondary Architects - only shown when active (hovered or selected) */}
+                  {isActive && (
+                    <>
+                      {/* Business Contact (wrapped, clickable) */}
+                      {businessLines.map((line, idx) => {
+                        const baseY = n.y - 22 + nameLines.length * 11 + descriptionLines.length * 8 + 6
+                        return (
+                          <text
+                            key={`biz-${idx}`}
+                            x={n.x}
+                            y={baseY + idx * 8}
+                            textAnchor="middle"
+                            className="fill-blue-600 hover:underline"
+                            style={{ fontSize: 9, cursor: 'pointer' }}
+                            onClick={(e) => handleFieldClick(e, 'businessContact', n.businessContact || '')}
+                          >
+                            {line}
+                          </text>
+                        )
+                      })}
+                      
+                      {/* Tech Contact (wrapped, clickable) */}
+                      {techLines.map((line, idx) => {
+                        const baseY = n.y - 22 + nameLines.length * 11 + descriptionLines.length * 8 + 6 + businessLines.length * 8
+                        return (
+                          <text
+                            key={`tech-${idx}`}
+                            x={n.x}
+                            y={baseY + idx * 8}
+                            textAnchor="middle"
+                            className="fill-blue-600 hover:underline"
+                            style={{ fontSize: 9, cursor: 'pointer' }}
+                            onClick={(e) => handleFieldClick(e, 'techContact', n.techContact || '')}
+                          >
+                            {line}
+                          </text>
+                        )
+                      })}
+                      
+                      {/* Primary Architect (wrapped, clickable) */}
+                      {primaryLines.map((line, idx) => {
+                        const baseY = n.y - 22 + nameLines.length * 11 + descriptionLines.length * 8 + 6 + (businessLines.length + techLines.length) * 8
+                        return (
+                          <text
+                            key={`primary-${idx}`}
+                            x={n.x}
+                            y={baseY + idx * 8}
+                            textAnchor="middle"
+                            className="fill-blue-600 hover:underline"
+                            style={{ fontSize: 9, cursor: 'pointer' }}
+                            onClick={(e) => handleFieldClick(e, 'primaryArchitect', n.primaryArchitect || '')}
+                          >
+                            {line}
+                          </text>
+                        )
+                      })}
+                      
+                      {/* Secondary Architects - show first names only, make each clickable */}
+                      {n.secondaryArchitects.length > 0 && (
+                        <foreignObject
+                          x={n.x - layout.nodeWidth / 2 + 4}
+                          y={n.y - 22 + nameLines.length * 11 + descriptionLines.length * 8 + 6 + (businessLines.length + techLines.length + primaryLines.length) * 8}
+                          width={layout.nodeWidth - 8}
+                          height={14}
                         >
-                          {getFirstName(arch.trim())}
-                        </span>
-                        {idx < n.secondaryArchitects.length - 1 && ', '}
-                      </span>
-                    ))}
-                  </div>
-                </foreignObject>
+                          <div style={{ fontSize: 9, textAlign: 'center', wordWrap: 'break-word' }}>
+                            {n.secondaryArchitects.map((arch, idx) => (
+                              <span key={idx}>
+                                <span
+                                  className="text-grey-600 hover:underline cursor-pointer"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setFieldFilter({ field: 'secondaryArchitects', value: arch.trim() })
+                                    setSelectedItemId(null)
+                                  }}
+                                >
+                                  {getFirstName(arch.trim())}
+                                </span>
+                                {idx < n.secondaryArchitects.length - 1 && ', '}
+                              </span>
+                            ))}
+                          </div>
+                        </foreignObject>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+              
+              {viewMode === 'tags' && (
+                <>
+                  {/* Tags - show all tags */}
+                  {n.tags.length > 0 && (
+                    <foreignObject
+                      x={n.x - layout.nodeWidth / 2 + 4}
+                      y={n.y - 10 + nameLines.length * 11}
+                      width={layout.nodeWidth - 8}
+                      height={Math.min(40, n.tags.length * 12)}
+                    >
+                      <div className="flex flex-wrap gap-1 justify-center text-[8px] leading-tight">
+                        {n.tags.map((tag, idx) => (
+                          <span
+                            key={idx}
+                            className="px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300"
+                            style={{ 
+                              backgroundColor: getTagColor(tag),
+                              border: `1px solid ${getTagBorderColor(tag)}`
+                            }}
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </foreignObject>
+                  )}
+                </>
+              )}
+              
+              {viewMode === 'skillGaps' && (
+                <>
+                  {/* Business Contact (wrapped, clickable) */}
+                  {businessLines.map((line, idx) => {
+                    const baseY = n.y - 20 + nameLines.length * 11
+                    return (
+                      <text
+                        key={`biz-${idx}`}
+                        x={n.x}
+                        y={baseY + idx * 9}
+                        textAnchor="middle"
+                        className="fill-blue-600 hover:underline"
+                        style={{ fontSize: 10, cursor: 'pointer' }}
+                        onClick={(e) => handleFieldClick(e, 'businessContact', n.businessContact || '')}
+                      >
+                        {line}
+                      </text>
+                    )
+                  })}
+                  
+                  {/* Tech Contact (wrapped, clickable) */}
+                  {techLines.map((line, idx) => {
+                    const baseY = n.y - 18 + nameLines.length * 11 + businessLines.length * 9
+                    return (
+                      <text
+                        key={`tech-${idx}`}
+                        x={n.x}
+                        y={baseY + idx * 9}
+                        textAnchor="middle"
+                        className="fill-blue-600 hover:underline"
+                        style={{ fontSize: 10, cursor: 'pointer' }}
+                        onClick={(e) => handleFieldClick(e, 'techContact', n.techContact || '')}
+                      >
+                        {line}
+                      </text>
+                    )
+                  })}
+                  
+                  {/* Primary Architect (wrapped, clickable) */}
+                  {primaryLines.map((line, idx) => {
+                    const baseY = n.y - 16 + nameLines.length * 11 + (businessLines.length + techLines.length) * 9
+                    return (
+                      <text
+                        key={`primary-${idx}`}
+                        x={n.x}
+                        y={baseY + idx * 9}
+                        textAnchor="middle"
+                        className="fill-blue-600 hover:underline"
+                        style={{ fontSize: 10, cursor: 'pointer' }}
+                        onClick={(e) => handleFieldClick(e, 'primaryArchitect', n.primaryArchitect || '')}
+                      >
+                        {line}
+                      </text>
+                    )
+                  })}
+                  
+                  {/* Secondary Architects - show first names only, make each clickable */}
+                  {n.secondaryArchitects.length > 0 && (
+                    <foreignObject
+                      x={n.x - layout.nodeWidth / 2 + 4}
+                      y={n.y - 24 + nameLines.length * 11 + (businessLines.length + techLines.length + primaryLines.length) * 9}
+                      width={layout.nodeWidth - 8}
+                      height={16}
+                    >
+                      <div style={{ fontSize: 10, textAlign: 'center', wordWrap: 'break-word' }}>
+                        {n.secondaryArchitects.map((arch, idx) => (
+                          <span key={idx}>
+                            <span
+                              className="text-grey-600 hover:underline cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setFieldFilter({ field: 'secondaryArchitects', value: arch.trim() })
+                                setSelectedItemId(null)
+                              }}
+                            >
+                              {getFirstName(arch.trim())}
+                            </span>
+                            {idx < n.secondaryArchitects.length - 1 && ', '}
+                          </span>
+                        ))}
+                      </div>
+                    </foreignObject>
+                  )}
+                </>
               )}
             </g>
           )

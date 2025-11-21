@@ -14,6 +14,7 @@ interface ItemDialogProps {
 export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogProps) {
   const isNew = !item?.id
   const [name, setName] = useState(item?.name || '')
+  const [description, setDescription] = useState(item?.description || '')
   const [businessContact, setBusinessContact] = useState(item?.businessContact || '')
   const [techContact, setTechContact] = useState(item?.techContact || '')
   const [primaryArchitect, setPrimaryArchitect] = useState(item?.primaryArchitect || '')
@@ -28,6 +29,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
   useEffect(() => {
     // Reset fields on item change
     setName(item?.name || '')
+    setDescription(item?.description || '')
     setBusinessContact(item?.businessContact || '')
     setTechContact(item?.techContact || '')
     setPrimaryArchitect(item?.primaryArchitect || '')
@@ -55,6 +57,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
     // Also clear when opening a fresh dialog to add
     if (open && isNew) {
       setName('')
+      setDescription('')
       setBusinessContact('')
       setTechContact('')
       setPrimaryArchitect('')
@@ -137,6 +140,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
         await db.items.add({
           lens,
           name: trimmedName,
+          description: description.trim() || undefined,
           businessContact,
           techContact,
           primaryArchitect,
@@ -149,6 +153,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
       } else {
         await db.items.update(item!.id!, {
           name: trimmedName,
+          description: description.trim() || undefined,
           businessContact,
           techContact,
           primaryArchitect,
@@ -166,7 +171,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={(isNew ? 'Add' : 'Edit') + ' ' + lensLabel(lens)}
+    <Modal open={open} onClose={onClose} title={(isNew ? 'Add' : 'Edit') + ' ' + lensLabel(lens)} wide
       footer={(
         <>
           <button className="px-3 py-1.5 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={onClose}>Cancel</button>
@@ -177,6 +182,9 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Field label="Name" required>
           <input value={name} onChange={e => setName(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" />
+        </Field>
+        <Field label="Description">
+          <textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" rows={4} placeholder="Enter a description of this item..." />
         </Field>
         <Field label="Business contact">
           <input value={businessContact} onChange={e => setBusinessContact(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" />

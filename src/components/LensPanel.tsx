@@ -51,6 +51,7 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
     if (!q) return items
     return items.filter(i => (
       i.name.toLowerCase().includes(q) ||
+      i.description?.toLowerCase().includes(q) ||
       i.businessContact?.toLowerCase().includes(q) ||
       i.techContact?.toLowerCase().includes(q) ||
       i.primaryArchitect?.toLowerCase().includes(q) ||
@@ -97,6 +98,7 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
             <tr className="text-left text-slate-500">
               <th className="py-2 pr-2">Gap</th>
               <th className="py-2 pr-2">Name</th>
+              <th className="py-2 pr-2">Description</th>
               <th className="py-2 pr-2">Business</th>
               <th className="py-2 pr-2">Tech</th>
               <th className="py-2 pr-2">Primary SME</th>
@@ -112,6 +114,13 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
               <tr key={item.id} className="border-t border-slate-100 dark:border-slate-800">
                 <td className="py-2 pr-2"><GapDot item={item} /></td>
                 <td className="py-2 pr-2">{item.name}</td>
+                <td className="py-2 pr-2 max-w-xs">
+                  {item.description ? (
+                    <div className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{item.description}</div>
+                  ) : (
+                    <span className="text-slate-400">(none)</span>
+                  )}
+                </td>
                 <td className="py-2 pr-2">{item.businessContact || <span className="text-slate-400">(blank)</span>}</td>
                 <td className="py-2 pr-2">{item.techContact || <span className="text-slate-400">(blank)</span>}</td>
                 <td className="py-2 pr-2">{item.primaryArchitect || <span className="text-slate-400">(blank)</span>}</td>
@@ -152,7 +161,7 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={10} className="text-center text-slate-500 py-6">No items</td>
+                <td colSpan={11} className="text-center text-slate-500 py-6">No items</td>
               </tr>
             )}
           </tbody>

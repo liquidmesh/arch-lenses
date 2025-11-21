@@ -30,6 +30,7 @@ export interface ItemRecord {
   id?: number;
   lens: LensKey;
   name: string; // unique within lens
+  description?: string;
   businessContact?: string;
   techContact?: string;
   primaryArchitect?: string;

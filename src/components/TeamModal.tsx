@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db } from '../db'
-import { type ItemRecord, type TeamMember, type LensKey, LENSES } from '../types'
+import { type ItemRecord, type TeamMember, LENSES } from '../types'
 import { Modal } from './Modal'
 
 interface TeamModalProps {
@@ -197,60 +197,6 @@ export function TeamModal({ open, onClose, view }: TeamModalProps) {
     return filtered
   }, [items, teamMembers, view])
 
-  // Calculate relationships between people (for architects view only)
-  const relationships = useMemo(() => {
-    if (view !== 'architects') return []
-    
-    const rels: Relationship[] = []
-    const personMap = new Map<string, PersonCoverage>()
-    
-    personCoverage.forEach(person => {
-      personMap.set(person.name, person)
-    })
-
-    // Manager relationships
-    personCoverage.forEach(person => {
-      if (person.manager) {
-        // Check if manager is also in the team
-        if (personMap.has(person.manager)) {
-          rels.push({ from: person.name, to: person.manager, type: 'manager' })
-        }
-      }
-    })
-
-    // Shared item relationships (people working on the same items)
-    const itemToPeople = new Map<number, Set<string>>()
-    items.forEach(item => {
-      if (item.id) {
-        const people = new Set<string>()
-        if (item.primaryArchitect) people.add(item.primaryArchitect.trim())
-        item.secondaryArchitects.forEach(arch => {
-          const name = arch.trim()
-          if (name) people.add(name)
-        })
-        if (people.size > 1) {
-          itemToPeople.set(item.id, people)
-        }
-      }
-    })
-
-    itemToPeople.forEach((peopleSet, itemId) => {
-      const peopleArray = Array.from(peopleSet)
-      for (let i = 0; i < peopleArray.length; i++) {
-        for (let j = i + 1; j < peopleArray.length; j++) {
-          const person1 = peopleArray[i]
-          const person2 = peopleArray[j]
-          // Only add if both are in the team
-          if (personMap.has(person1) && personMap.has(person2)) {
-            rels.push({ from: person1, to: person2, type: 'shared-item' })
-          }
-        }
-      }
-    })
-
-    return rels
-  }, [personCoverage, items, view])
-
   // Group by manager, then by coverage
   const groupedPeople = useMemo(() => {
     const groups = new Map<string | undefined, Map<CoverageGroup, PersonCoverage[]>>()
@@ -314,7 +260,7 @@ export function TeamModal({ open, onClose, view }: TeamModalProps) {
 
     // Sort within each group
     groups.forEach(managerGroup => {
-      managerGroup.forEach((people, group) => {
+      managerGroup.forEach((people) => {
         people.sort((a, b) => {
           // Primary roles first, then by total coverage
           if (view === 'architects') {
@@ -350,26 +296,6 @@ export function TeamModal({ open, onClose, view }: TeamModalProps) {
       if (total >= 2) return 'bg-green-100 dark:bg-green-900 border-green-300 dark:border-green-700'
       if (total >= 1) return 'bg-yellow-100 dark:bg-yellow-900 border-yellow-300 dark:border-yellow-700'
       return 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700'
-    }
-  }
-
-  function getCoverageLabel(person: PersonCoverage): string {
-    if (view === 'architects') {
-      if (person.hasPrimary) {
-        if (person.totalCoverage >= 5) return 'High Coverage (Key)'
-        if (person.totalCoverage >= 2) return 'Medium Coverage (Key)'
-        return 'Low Coverage (Key)'
-      } else {
-        if (person.secondaryCount >= 3) return 'Medium (Secondary Only)'
-        if (person.secondaryCount >= 1) return 'Low (Secondary Only)'
-        return 'No Coverage'
-      }
-    } else {
-      const total = person.businessContactCount + person.techContactCount
-      if (total >= 5) return 'High Coverage'
-      if (total >= 2) return 'Medium Coverage'
-      if (total >= 1) return 'Low Coverage'
-      return 'No Coverage'
     }
   }
 

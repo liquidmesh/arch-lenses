@@ -13,12 +13,14 @@ export function TeamManager({ open, onClose }: TeamManagerProps) {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [name, setName] = useState('')
   const [manager, setManager] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     if (!open) {
       setEditingId(null)
       setName('')
       setManager('')
+      setSearchQuery('')
       return
     }
     loadMembers()
@@ -87,95 +89,129 @@ export function TeamManager({ open, onClose }: TeamManagerProps) {
   // Get unique manager names for autocomplete
   const managerOptions = Array.from(new Set(members.map(m => m.manager).filter(Boolean)))
 
+  // Filter members based on search query
+  const filteredMembers = members.filter(member => {
+    if (!searchQuery.trim()) return true
+    const query = searchQuery.toLowerCase()
+    return (
+      member.name.toLowerCase().includes(query) ||
+      (member.manager && member.manager.toLowerCase().includes(query))
+    )
+  })
+
   return (
     <Modal open={open} onClose={onClose} title="Manage Architecture Team">
-      <div className="space-y-4">
-        <div className="border border-slate-200 dark:border-slate-800 rounded p-4">
-          <h4 className="font-medium mb-3">
-            {editingId ? 'Edit Team Member' : 'Add Team Member'}
-          </h4>
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm font-medium mb-1">Name *</label>
-              <input
-                type="text"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                className="w-full px-2 py-1 border border-slate-300 dark:border-slate-700 rounded"
-                placeholder="Team member name"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Manager</label>
-              <input
-                type="text"
-                value={manager}
-                onChange={e => setManager(e.target.value)}
-                list="manager-list"
-                className="w-full px-2 py-1 border border-slate-300 dark:border-slate-700 rounded"
-                placeholder="Manager name (optional)"
-              />
-              <datalist id="manager-list">
-                {managerOptions.map(m => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={save}
-                className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700"
-              >
-                {editingId ? 'Update' : 'Add'}
-              </button>
-              {editingId && (
+      <div className="flex flex-col" style={{ height: '100%', maxHeight: '100%' }}>
+        <div className="flex-shrink-0 space-y-4 pb-4">
+          <div className="border border-slate-200 dark:border-slate-800 rounded p-4">
+            <h4 className="font-medium mb-3">
+              {editingId ? 'Edit Team Member' : 'Add Team Member'}
+            </h4>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">Name *</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  className="w-full px-2 py-1 border border-slate-300 dark:border-slate-700 rounded"
+                  placeholder="Team member name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Manager</label>
+                <input
+                  type="text"
+                  value={manager}
+                  onChange={e => setManager(e.target.value)}
+                  list="manager-list"
+                  className="w-full px-2 py-1 border border-slate-300 dark:border-slate-700 rounded"
+                  placeholder="Manager name (optional)"
+                />
+                <datalist id="manager-list">
+                  {managerOptions.map(m => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="flex gap-2">
                 <button
-                  onClick={cancelEdit}
-                  className="px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+                  onClick={save}
+                  className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700"
                 >
-                  Cancel
+                  {editingId ? 'Update' : 'Add'}
                 </button>
-              )}
+                {editingId && (
+                  <button
+                    onClick={cancelEdit}
+                    className="px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
             </div>
+          </div>
+
+          <div className="flex-shrink-0">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-medium">Team Members ({filteredMembers.length}{searchQuery && ` of ${members.length}`})</h4>
+            </div>
+            {members.length === 0 ? (
+              <p className="text-sm text-slate-500 dark:text-slate-400">No team members added yet</p>
+            ) : (
+              <div className="mb-3">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full px-2 py-1.5 text-sm border border-slate-300 dark:border-slate-700 rounded"
+                  placeholder="Search by name or manager..."
+                />
+              </div>
+            )}
           </div>
         </div>
 
-        <div>
-          <h4 className="font-medium mb-3">Team Members ({members.length})</h4>
-          {members.length === 0 ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No team members added yet</p>
-          ) : (
-            <div className="space-y-2">
-              {members.map(member => (
-                <div
-                  key={member.id}
-                  className="flex items-center justify-between p-3 border border-slate-200 dark:border-slate-800 rounded"
-                >
-                  <div>
-                    <div className="font-medium">{member.name}</div>
-                    {member.manager && (
-                      <div className="text-sm text-slate-500 dark:text-slate-400">
-                        Manager: {member.manager}
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {members.length === 0 ? null : (
+            <>
+              {filteredMembers.length === 0 ? (
+                <p className="text-sm text-slate-500 dark:text-slate-400">No team members match your search</p>
+              ) : (
+                <div className="h-full overflow-y-scroll overflow-x-hidden space-y-2 pr-2">
+                  {filteredMembers.map(member => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-3 border border-slate-200 dark:border-slate-800 rounded"
+                    >
+                      <div>
+                        <div className="font-medium">{member.name}</div>
+                        {member.manager && (
+                          <div className="text-sm text-slate-500 dark:text-slate-400">
+                            Manager: {member.manager}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => startEdit(member)}
-                      className="px-2 py-1 text-sm border border-slate-300 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => deleteMember(member.id!)}
-                      className="px-2 py-1 text-sm border border-red-300 dark:border-red-700 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400"
-                    >
-                      Delete
-                    </button>
-                  </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => startEdit(member)}
+                          className="px-2 py-1 text-sm border border-slate-300 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteMember(member.id!)}
+                          className="px-2 py-1 text-sm border border-red-300 dark:border-red-700 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
         </div>
       </div>

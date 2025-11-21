@@ -282,14 +282,9 @@ export function TeamModal({ open, onClose, view }: TeamModalProps) {
     return items.filter(item => item.skillsGaps && item.skillsGaps.trim().length > 0)
   }, [items])
 
-  function getCoverageColor(person: PersonCoverage): string {
-    if (view === 'architects') {
-      // All architect boxes use white background with standard border
-      return 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
-    } else {
-      // Stakeholders - white background, no colors
-      return 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
-    }
+  function getCoverageColor(): string {
+    // All boxes use white background with standard border
+    return 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
   }
 
   return (
@@ -329,7 +324,7 @@ export function TeamModal({ open, onClose, view }: TeamModalProps) {
                       {people.map(person => (
                         <div
                           key={person.name}
-                          className={`p-2 rounded border-2 ${getCoverageColor(person)} ${
+                          className={`p-2 rounded border-2 ${getCoverageColor()} ${
                             view === 'architects' && !person.hasPrimary && person.secondaryCount > 0 ? 'border-dashed' : ''
                           } bg-white dark:bg-slate-900`}
                         >

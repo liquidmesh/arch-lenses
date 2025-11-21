@@ -64,6 +64,22 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
     return rels.filter(r => r.fromItemId === activeItemId || r.toItemId === activeItemId)
   }, [rels, selectedItemId, hoveredItemId])
 
+  // Get set of related item IDs for highlighting
+  const relatedItemIds = useMemo(() => {
+    const activeItemId = hoveredItemId || selectedItemId
+    if (!activeItemId) return new Set<number>()
+    const relatedIds = new Set<number>()
+    relatedIds.add(activeItemId) // Include the active item itself
+    visibleRels.forEach(rel => {
+      if (rel.fromItemId === activeItemId) {
+        relatedIds.add(rel.toItemId)
+      } else if (rel.toItemId === activeItemId) {
+        relatedIds.add(rel.fromItemId)
+      }
+    })
+    return relatedIds
+  }, [visibleRels, selectedItemId, hoveredItemId])
+
   // Only include visible lenses in layout
   const visibleLenses = useMemo(() => LENSES.filter(l => visible[l.key]), [visible])
   const layout = useMemo(() => computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode), [filteredItems, dims, visibleLenses, layoutMode])
@@ -110,7 +126,12 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
         </div>
       </div>
       <div className="overflow-auto w-full h-full" style={{ marginTop: '48px' }}>
-        <svg width={layout.width} height={layout.height} className="block" style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}>
+        <svg 
+          width={layout.width} 
+          height={layout.height} 
+          className="block" 
+          style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}
+        >
         {/* Lens headers */}
         {layout.headers.map(header => (
           <g key={header.key}>
@@ -130,7 +151,6 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
         })}
         {/* Nodes */}
         {layout.nodes.map(n => {
-          const isSelected = selectedItemId === n.id
           const handleFieldClick = (e: React.MouseEvent, field: string, value: string) => {
             e.stopPropagation()
             if (value && value.trim()) {
@@ -170,11 +190,15 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
           const primaryLines = n.primaryArchitect ? wrapText(n.primaryArchitect, maxTextWidth, 10) : []
           
           const hasSkillsGap = !!n.skillsGaps?.trim()
-          const fillColor = hasSkillsGap ? (isSelected ? "#fecaca" : "#fee2e2") : (isSelected ? "#bfdbfe" : "#e0f2fe")
-          const strokeColor = hasSkillsGap ? (isSelected ? "#dc2626" : "#ef4444") : (isSelected ? "#2563eb" : "#3b82f6")
-          
+          const isSelected = selectedItemId === n.id
           const isHovered = hoveredItemId === n.id
-          const isActive = isSelected || isHovered
+          const isRelated = n.id !== undefined && relatedItemIds.has(n.id)
+          const isActive = isSelected || isHovered || isRelated
+          const fillColor = hasSkillsGap ? (isActive ? "#fecaca" : "#fee2e2") : (isActive ? "#bfdbfe" : "#e0f2fe")
+          const strokeColor = hasSkillsGap ? (isActive ? "#dc2626" : "#ef4444") : (isActive ? "#2563eb" : "#3b82f6")
+          
+          // Determine stroke width: thicker for hovered/selected, medium for related, thin for others
+          const strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
           
           return (
             <g 
@@ -184,7 +208,7 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
               onMouseLeave={() => setHoveredItemId(null)}
               style={{ cursor: 'pointer' }}
             >
-              <rect x={n.x - layout.nodeWidth / 2} y={n.y - layout.nodeHeight / 2} width={layout.nodeWidth} height={layout.nodeHeight} rx={6} ry={6} fill={fillColor} stroke={strokeColor} strokeWidth={isActive ? 2 : 1} />
+              <rect x={n.x - layout.nodeWidth / 2} y={n.y - layout.nodeHeight / 2} width={layout.nodeWidth} height={layout.nodeHeight} rx={6} ry={6} fill={fillColor} stroke={strokeColor} strokeWidth={strokeWidth} />
               
               {/* Name (wrapped) */}
               {nameLines.map((line, idx) => (
@@ -332,40 +356,63 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
   } else {
     // Row layout: lenses as rows
     const rowHeight = nodeHeight + rowGap
-    let maxCols = 0
+    const headerHeight = 30
+    const headerGap = 10 // Gap between header and items
+    let currentY = 0
     
     visibleLenses.forEach((l, rowIdx) => {
       const rowItems = items.filter(i => i.lens === l.key)
-      maxCols = Math.max(maxCols, rowItems.length)
       
-      const headerHeight = 30
+      // Calculate how many rows of items are needed for this lens
+      const itemsPerRow = Math.max(1, Math.floor((availableW - padding * 2) / 170))
+      const numItemRows = Math.ceil(rowItems.length / itemsPerRow)
+      
+      // Position header for this lens
       headers.push({
         key: l.key as LensKey,
         label: l.label,
         x: 0,
-        y: rowIdx * (rowHeight + headerHeight),
+        y: currentY,
         width: availableW,
         height: headerHeight
       })
       
-      const itemsPerRow = Math.max(1, Math.floor((availableW - padding * 2) / 170))
+      currentY += headerHeight + headerGap
+      
+      // Position items for this lens
       const itemWidth = Math.floor((availableW - padding * 2 - colGap * (itemsPerRow - 1)) / itemsPerRow)
       
       rowItems.forEach((it, colIdx) => {
         const col = colIdx % itemsPerRow
         const row = Math.floor(colIdx / itemsPerRow)
         const x = padding + col * (itemWidth + colGap) + itemWidth / 2
-        const y = rowIdx * (rowHeight + headerHeight) + headerHeight + row * rowHeight + nodeHeight / 2
+        const y = currentY + row * rowHeight + nodeHeight / 2
         if (it.id) positions.set(it.id, { x, y })
         nodes.push({ ...it, x, y })
       })
+      
+      // Move to next lens position
+      // Items are positioned with center at: currentY + row * rowHeight + nodeHeight / 2
+      // For the last row (row = numItemRows - 1):
+      //   Center: currentY + (numItemRows - 1) * rowHeight + nodeHeight / 2
+      //   Bottom: currentY + (numItemRows - 1) * rowHeight + nodeHeight / 2 + nodeHeight / 2
+      //         = currentY + (numItemRows - 1) * rowHeight + nodeHeight
+      if (numItemRows > 0) {
+        // Calculate the actual bottom edge of the last item in this lens section
+        const lastItemCenterY = currentY + (numItemRows - 1) * rowHeight + nodeHeight / 2
+        const lastItemBottom = lastItemCenterY + nodeHeight / 2
+        currentY = lastItemBottom + 10 // Gap between lens sections
+      } else {
+        currentY += 10 // Just gap if no items
+      }
     })
 
-    const contentH = visibleLenses.length * (nodeHeight + rowGap + 40) + padding
     const width = availableW
-    const height = Math.max(availableH, contentH)
-    const nodeWidth = 160
+    // Ensure height accounts for all content - currentY is at the bottom of the last item + gap
+    // Add generous padding at the bottom to ensure nothing is cut off
+    const calculatedHeight = currentY + padding + 30 // Extra padding to ensure last row is fully visible
+    const height = Math.max(availableH, calculatedHeight)
 
-    return { width, height, nodes, positions, headers, nodeWidth, nodeHeight }
+    return { width, height, nodes, positions, headers, nodeWidth: 160, nodeHeight }
   }
 }

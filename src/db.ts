@@ -1,9 +1,10 @@
 import Dexie, { type Table } from 'dexie'
-import type { ItemRecord, RelationshipRecord } from './types'
+import type { ItemRecord, RelationshipRecord, TeamMember } from './types'
 
 class ArchLensesDB extends Dexie {
   items!: Table<ItemRecord, number>
   relationships!: Table<RelationshipRecord, number>
+  teamMembers!: Table<TeamMember, number>
 
   constructor() {
     super('arch-lenses-db')
@@ -16,6 +17,12 @@ class ArchLensesDB extends Dexie {
     this.version(2).stores({
       items: '++id, &[lens+name], lens, name, updatedAt',
       relationships: '++id, fromLens, fromItemId, toLens, toItemId',
+    })
+    // Version 3: Add team members table
+    this.version(3).stores({
+      items: '++id, &[lens+name], lens, name, updatedAt',
+      relationships: '++id, fromLens, fromItemId, toLens, toItemId',
+      teamMembers: '++id, name, manager, updatedAt',
     })
   }
 }

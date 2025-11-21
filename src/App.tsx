@@ -5,12 +5,16 @@ import { LensPanel } from './components/LensPanel'
 import { LENSES, type LensKey, type ExportBundle } from './types'
 import { seedIfEmpty, db } from './db'
 import { GraphModal } from './components/GraphModal'
+import { TeamModal } from './components/TeamModal'
+import { TeamManager } from './components/TeamManager'
 
 function App() {
   const initialVisible = useMemo(() => Object.fromEntries(LENSES.map(l => [l.key, true])) as Record<LensKey, boolean>, [])
   const [visible, setVisible] = useState<Record<LensKey, boolean>>(initialVisible)
   const [query, setQuery] = useState('')
   const [diagramOpen, setDiagramOpen] = useState(false)
+  const [teamView, setTeamView] = useState<'architects' | 'stakeholders' | null>(null)
+  const [teamManagerOpen, setTeamManagerOpen] = useState(false)
 
   useEffect(() => {
     seedIfEmpty()
@@ -31,11 +35,13 @@ function App() {
   async function onExport() {
     const items = await db.items.toArray()
     const relationships = await db.relationships.toArray()
+    const teamMembers = await db.teamMembers.toArray()
     const bundle: ExportBundle = {
       version: 1,
       exportedAt: new Date().toISOString(),
       items,
       relationships,
+      teamMembers,
     }
     const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -50,11 +56,15 @@ function App() {
     const text = await file.text()
     const data = JSON.parse(text) as ExportBundle
     if (!confirm('Import will replace current data. Continue?')) return
-    await db.transaction('rw', db.items, db.relationships, async () => {
+    await db.transaction('rw', db.items, db.relationships, db.teamMembers, async () => {
       await db.items.clear()
       await db.relationships.clear()
+      await db.teamMembers.clear()
       await db.items.bulkAdd(data.items)
       await db.relationships.bulkAdd(data.relationships)
+      if (data.teamMembers) {
+        await db.teamMembers.bulkAdd(data.teamMembers)
+      }
     })
     alert('Import complete')
   }
@@ -73,6 +83,9 @@ function App() {
           />
           <div className="ml-auto flex gap-2 items-center">
             <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => setDiagramOpen(true)}>Diagram</button>
+            <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => setTeamView('architects')}>Architecture Team</button>
+            <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => setTeamView('stakeholders')}>Stakeholders</button>
+            <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => setTeamManagerOpen(true)}>Manage Team</button>
             <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={onExport}>Export</button>
             <label className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 cursor-pointer">
               Import
@@ -89,6 +102,14 @@ function App() {
         </div>
       </main>
       <GraphModal open={diagramOpen} onClose={() => setDiagramOpen(false)} visible={visible} />
+      {teamView && (
+        <TeamModal
+          open={teamView !== null}
+          onClose={() => setTeamView(null)}
+          view={teamView}
+        />
+      )}
+      <TeamManager open={teamManagerOpen} onClose={() => setTeamManagerOpen(false)} />
     </div>
   )
 }

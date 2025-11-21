@@ -49,11 +49,20 @@ export interface RelationshipRecord {
   createdAt: number;
 }
 
+export interface TeamMember {
+  id?: number;
+  name: string;
+  manager?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type ExportBundle = {
   version: 1;
   exportedAt: string;
   items: ItemRecord[];
   relationships: RelationshipRecord[];
+  teamMembers?: TeamMember[];
 };
 
 export function hasGap(item: ItemRecord): boolean {

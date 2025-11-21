@@ -23,12 +23,12 @@ export function Modal({ open, onClose, title, children, footer, fullScreen }: Mo
     <div className="fixed inset-0 z-50 flex items-stretch justify-stretch">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className={fullScreen ? 'relative m-0 w-full h-full' : 'relative w-full max-w-2xl mx-4 my-auto'}>
-        <div className={(fullScreen ? 'h-full' : '') + ' rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-lg flex flex-col'}>
-          <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center">
+        <div className={(fullScreen ? 'h-full' : '') + ' rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-lg flex flex-col overflow-hidden'}>
+          <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center shrink-0">
             <h3 className="font-semibold text-base">{title}</h3>
             <button className="ml-auto px-2 py-1 text-sm" onClick={onClose}>Close</button>
           </div>
-          <div className={fullScreen ? 'flex-1 p-0' : 'p-4'}>
+          <div className={fullScreen ? 'flex-1 p-0 overflow-hidden' : 'p-4'}>
             {children}
           </div>
           {footer && !fullScreen && (

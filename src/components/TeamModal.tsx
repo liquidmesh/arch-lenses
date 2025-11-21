@@ -277,25 +277,18 @@ export function TeamModal({ open, onClose, view }: TeamModalProps) {
     return groups
   }, [personCoverage, view])
 
+  // Get items with skills gaps for the "New" box
+  const itemsWithSkillsGaps = useMemo(() => {
+    return items.filter(item => item.skillsGaps && item.skillsGaps.trim().length > 0)
+  }, [items])
+
   function getCoverageColor(person: PersonCoverage): string {
     if (view === 'architects') {
-      if (person.hasPrimary) {
-        if (person.totalCoverage >= 5) return 'bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-700'
-        if (person.totalCoverage >= 2) return 'bg-green-100 dark:bg-green-900 border-green-300 dark:border-green-700'
-        return 'bg-yellow-100 dark:bg-yellow-900 border-yellow-300 dark:border-yellow-700'
-      } else {
-        // Secondary only
-        if (person.secondaryCount >= 3) return 'bg-purple-100 dark:bg-purple-900 border-purple-300 dark:border-purple-700'
-        if (person.secondaryCount >= 1) return 'bg-orange-100 dark:bg-orange-900 border-orange-300 dark:border-orange-700'
-        return 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700'
-      }
+      // All architect boxes use white background with standard border
+      return 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
     } else {
-      // Stakeholders
-      const total = person.businessContactCount + person.techContactCount
-      if (total >= 5) return 'bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-700'
-      if (total >= 2) return 'bg-green-100 dark:bg-green-900 border-green-300 dark:border-green-700'
-      if (total >= 1) return 'bg-yellow-100 dark:bg-yellow-900 border-yellow-300 dark:border-yellow-700'
-      return 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700'
+      // Stakeholders - white background, no colors
+      return 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
     }
   }
 
@@ -322,16 +315,14 @@ export function TeamModal({ open, onClose, view }: TeamModalProps) {
                 : (['all'] as CoverageGroup[])
               ).map(coverageGroup => {
                 const people = managerGroup.get(coverageGroup) || []
-                // Always show "No Coverage" section for architects view, even if empty
-                if (people.length === 0 && !(view === 'architects' && coverageGroup === 'none')) return null
+                // Don't show empty groups
+                if (people.length === 0) return null
 
                 return (
                   <div key={coverageGroup} className="mb-3">
-                    {view === 'architects' && (
+                    {view === 'architects' && coverageGroup === 'none' && (
                       <h4 className="text-xs font-medium mb-1.5 text-slate-600 dark:text-slate-400 uppercase tracking-wide">
-                        {coverageGroup === 'high' ? 'High Coverage' :
-                         coverageGroup === 'medium' ? 'Medium Coverage' :
-                         coverageGroup === 'low' ? 'Low Coverage' : 'No Coverage'}
+                        No Coverage
                       </h4>
                     )}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
@@ -428,6 +419,37 @@ export function TeamModal({ open, onClose, view }: TeamModalProps) {
               })}
             </div>
           ))}
+          {/* "Skills Needed" box for items with skills gaps - only show in architects view, at the bottom */}
+          {view === 'architects' && itemsWithSkillsGaps.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-base font-semibold mb-2 text-slate-700 dark:text-slate-300">
+                Skills Needed
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
+                {itemsWithSkillsGaps.map(item => {
+                  const lensLabel = LENSES.find(l => l.key === item.lens)?.label || item.lens
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-2 rounded border-2 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700"
+                    >
+                      <div className="font-semibold text-sm text-slate-800 dark:text-slate-200 mb-1.5">
+                        {item.name}
+                      </div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mb-1">
+                        {lensLabel}
+                      </div>
+                      <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+                        <div className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight whitespace-pre-wrap">
+                          {item.skillsGaps}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           </div>
         </div>
       </div>

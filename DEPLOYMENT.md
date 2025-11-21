@@ -221,3 +221,6 @@ The app references PWA icons that need to exist. If missing, create placeholder 
 - Check that icon files exist in `dist/`
 - Verify paths in `vite.config.ts` match actual file locations
 
+
+
+

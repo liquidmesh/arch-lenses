@@ -35,6 +35,7 @@ export interface ItemRecord {
   primaryArchitect?: string;
   secondaryArchitects: string[];
   tags: string[];
+  skillsGaps?: string;
   createdAt: number;
   updatedAt: number;
 }

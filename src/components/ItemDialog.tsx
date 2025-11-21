@@ -19,9 +19,11 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
   const [primaryArchitect, setPrimaryArchitect] = useState(item?.primaryArchitect || '')
   const [secondaryArchitectsText, setSecondaryArchitectsText] = useState((item?.secondaryArchitects || []).join(', '))
   const [tagsText, setTagsText] = useState((item?.tags || []).join(', '))
+  const [skillsGaps, setSkillsGaps] = useState(item?.skillsGaps || '')
 
   // Relationships (outgoing from this item)
   const [rels, setRels] = useState<RelationshipRecord[]>([])
+  const [relatedItems, setRelatedItems] = useState<Map<number, ItemRecord>>(new Map())
 
   useEffect(() => {
     // Reset fields on item change
@@ -31,10 +33,21 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
     setPrimaryArchitect(item?.primaryArchitect || '')
     setSecondaryArchitectsText((item?.secondaryArchitects || []).join(', '))
     setTagsText((item?.tags || []).join(', '))
+    setSkillsGaps(item?.skillsGaps || '')
     if (item?.id) {
-      db.relationships.where({ fromItemId: item.id }).toArray().then(setRels)
+      db.relationships.where({ fromItemId: item.id }).toArray().then(async (relationships) => {
+        setRels(relationships)
+        // Load related items
+        const itemsMap = new Map<number, ItemRecord>()
+        for (const rel of relationships) {
+          const relatedItem = await db.items.get(rel.toItemId)
+          if (relatedItem) itemsMap.set(rel.toItemId, relatedItem)
+        }
+        setRelatedItems(itemsMap)
+      })
     } else {
       setRels([])
+      setRelatedItems(new Map())
     }
   }, [item?.id, item])
 
@@ -47,7 +60,9 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
       setPrimaryArchitect('')
       setSecondaryArchitectsText('')
       setTagsText('')
+      setSkillsGaps('')
       setRels([])
+      setRelatedItems(new Map())
     }
   }, [open, isNew])
 
@@ -79,6 +94,13 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
     }
     const updated = await db.relationships.where({ fromItemId: item.id }).toArray()
     setRels(updated)
+    // Reload related items
+    const itemsMap = new Map<number, ItemRecord>()
+    for (const rel of updated) {
+      const relatedItem = await db.items.get(rel.toItemId)
+      if (relatedItem) itemsMap.set(rel.toItemId, relatedItem)
+    }
+    setRelatedItems(itemsMap)
   }
 
   async function removeRelationship(id?: number) {
@@ -89,7 +111,15 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
     // delete reverse as well
     const reverse = await db.relationships.where({ fromItemId: rel.toItemId, toItemId: rel.fromItemId }).first()
     if (reverse?.id) await db.relationships.delete(reverse.id)
-    setRels(await db.relationships.where({ fromItemId: item.id }).toArray())
+    const updated = await db.relationships.where({ fromItemId: item.id }).toArray()
+    setRels(updated)
+    // Reload related items
+    const itemsMap = new Map<number, ItemRecord>()
+    for (const rel of updated) {
+      const relatedItem = await db.items.get(rel.toItemId)
+      if (relatedItem) itemsMap.set(rel.toItemId, relatedItem)
+    }
+    setRelatedItems(itemsMap)
   }
 
   async function save() {
@@ -112,6 +142,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
           primaryArchitect,
           secondaryArchitects,
           tags,
+          skillsGaps,
           createdAt: now,
           updatedAt: now,
         })
@@ -123,6 +154,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
           primaryArchitect,
           secondaryArchitects,
           tags,
+          skillsGaps,
           updatedAt: now,
         })
       }
@@ -161,6 +193,9 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
         <Field label="Tags (comma separated)">
           <input value={tagsText} onChange={e => setTagsText(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" />
         </Field>
+        <Field label="Skills Gaps">
+          <textarea value={skillsGaps} onChange={e => setSkillsGaps(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" rows={3} placeholder="Describe any skills gaps..." />
+        </Field>
       </div>
 
       {!isNew && (
@@ -168,12 +203,15 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
           <h4 className="font-medium mb-2">Relationships</h4>
           <div className="flex flex-wrap gap-2 mb-3">
             {rels.length === 0 && <span className="text-slate-500 text-sm">No relationships</span>}
-            {rels.map(r => (
-              <span key={r.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-100 dark:bg-slate-800">
-                {lensLabel(r.toLens)} #{r.toItemId}
-                <button className="ml-1" onClick={() => removeRelationship(r.id)}>×</button>
-              </span>
-            ))}
+            {rels.map(r => {
+              const relatedItem = relatedItems.get(r.toItemId)
+              return (
+                <span key={r.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-100 dark:bg-slate-800">
+                  {lensLabel(r.toLens)}: {relatedItem?.name || `#${r.toItemId}`}
+                  <button className="ml-1" onClick={() => removeRelationship(r.id)}>×</button>
+                </span>
+              )
+            })}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
             <div>

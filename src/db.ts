@@ -12,6 +12,11 @@ class ArchLensesDB extends Dexie {
       items: '++id, &[lens+name], lens, name, updatedAt',
       relationships: '++id, fromLens, fromItemId, toLens, toItemId',
     })
+    // Version 2: Add skillsGaps field (no schema change needed, just version bump for migration)
+    this.version(2).stores({
+      items: '++id, &[lens+name], lens, name, updatedAt',
+      relationships: '++id, fromLens, fromItemId, toLens, toItemId',
+    })
   }
 }
 

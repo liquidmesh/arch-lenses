@@ -16,6 +16,7 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
   const [rels, setRels] = useState<RelationshipRecord[]>([])
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
+  const [hoveredItemId, setHoveredItemId] = useState<number | null>(null)
   const [fieldFilter, setFieldFilter] = useState<{ field: string; value: string } | null>(null)
   const [layoutMode, setLayoutMode] = useState<'columns' | 'rows'>('columns')
   const [zoom, setZoom] = useState(1)
@@ -56,11 +57,12 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
     })
   }, [items, fieldFilter])
 
-  // Filter relationships to only show those related to selected item
+  // Filter relationships to only show those related to selected or hovered item
   const visibleRels = useMemo(() => {
-    if (!selectedItemId) return []
-    return rels.filter(r => r.fromItemId === selectedItemId || r.toItemId === selectedItemId)
-  }, [rels, selectedItemId])
+    const activeItemId = hoveredItemId || selectedItemId
+    if (!activeItemId) return []
+    return rels.filter(r => r.fromItemId === activeItemId || r.toItemId === activeItemId)
+  }, [rels, selectedItemId, hoveredItemId])
 
   // Only include visible lenses in layout
   const visibleLenses = useMemo(() => LENSES.filter(l => visible[l.key]), [visible])
@@ -87,8 +89,10 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
           <div className="flex items-center gap-2">
             {selectedItemId ? (
               <span>Showing relationships for selected item. Click again to deselect.</span>
+            ) : hoveredItemId ? (
+              <span>Hovering over item - showing relationships. Click to select.</span>
             ) : (
-              <span>Click an item to see its relationships. Click field values to filter.</span>
+              <span>Hover over an item to see its relationships. Click to select. Click field values to filter.</span>
             )}
           </div>
         )}
@@ -165,9 +169,22 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
           const techLines = n.techContact ? wrapText(n.techContact, maxTextWidth, 10) : []
           const primaryLines = n.primaryArchitect ? wrapText(n.primaryArchitect, maxTextWidth, 10) : []
           
+          const hasSkillsGap = !!n.skillsGaps?.trim()
+          const fillColor = hasSkillsGap ? (isSelected ? "#fecaca" : "#fee2e2") : (isSelected ? "#bfdbfe" : "#e0f2fe")
+          const strokeColor = hasSkillsGap ? (isSelected ? "#dc2626" : "#ef4444") : (isSelected ? "#2563eb" : "#3b82f6")
+          
+          const isHovered = hoveredItemId === n.id
+          const isActive = isSelected || isHovered
+          
           return (
-            <g key={n.id} onClick={() => setSelectedItemId(isSelected ? null : (n.id || null))} style={{ cursor: 'pointer' }}>
-              <rect x={n.x - layout.nodeWidth / 2} y={n.y - layout.nodeHeight / 2} width={layout.nodeWidth} height={layout.nodeHeight} rx={6} ry={6} fill={isSelected ? "#bfdbfe" : "#e0f2fe"} stroke={isSelected ? "#2563eb" : "#3b82f6"} strokeWidth={isSelected ? 2 : 1} />
+            <g 
+              key={n.id} 
+              onClick={() => setSelectedItemId(isSelected ? null : (n.id || null))} 
+              onMouseEnter={() => setHoveredItemId(n.id || null)}
+              onMouseLeave={() => setHoveredItemId(null)}
+              style={{ cursor: 'pointer' }}
+            >
+              <rect x={n.x - layout.nodeWidth / 2} y={n.y - layout.nodeHeight / 2} width={layout.nodeWidth} height={layout.nodeHeight} rx={6} ry={6} fill={fillColor} stroke={strokeColor} strokeWidth={isActive ? 2 : 1} />
               
               {/* Name (wrapped) */}
               {nameLines.map((line, idx) => (
@@ -305,7 +322,9 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     })
 
     const contentH = topOffset + Math.max(1, maxRows) * (nodeHeight + rowGap) + padding
-    const width = availableW
+    // Ensure width accounts for all columns
+    const calculatedWidth = padding + n * colWidth + (n - 1) * colGap + padding
+    const width = Math.max(availableW, calculatedWidth)
     const height = Math.max(availableH, contentH)
     const nodeWidth = Math.min(200, Math.floor(colWidth * 0.9))
 

@@ -15,7 +15,6 @@ Your project is now configured for GitHub and GitHub Pages deployment! 🚀
 ### 1. Create Your First Commit
 
 ```bash
-cd "/Users/neb/arch lenses/arch-lenses"
 git commit -m "Initial commit: Arch Lenses application"
 ```
 

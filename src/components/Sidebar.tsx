@@ -35,3 +35,6 @@ export function Sidebar({ visible, onToggle, onShowAll, onHideAll }: SidebarProp
   )
 }
 
+
+
+

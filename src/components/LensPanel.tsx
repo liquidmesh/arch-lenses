@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db } from '../db'
-import { hasGap, type ItemRecord, type LensKey } from '../types'
+import { hasGap, type ItemRecord, type LensKey, type RelationshipRecord } from '../types'
+import { LENSES } from '../types'
 import clsx from 'clsx'
 import { ItemDialog } from './ItemDialog'
 
@@ -14,10 +15,31 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
   const [items, setItems] = useState<ItemRecord[]>([])
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogItem, setDialogItem] = useState<ItemRecord | null>(null)
+  const [relationships, setRelationships] = useState<RelationshipRecord[]>([])
+  const [relatedItemsMap, setRelatedItemsMap] = useState<Map<number, ItemRecord>>(new Map())
 
   async function load() {
     const rows = await db.items.where('lens').equals(lens).sortBy('name')
     setItems(rows)
+    
+    // Load all relationships for items in this lens
+    const allRels = await db.relationships.toArray()
+    const itemIds = new Set(rows.map(r => r.id).filter((id): id is number => !!id))
+    const relevantRels = allRels.filter(r => itemIds.has(r.fromItemId) || itemIds.has(r.toItemId))
+    setRelationships(relevantRels)
+    
+    // Load related items
+    const relatedIds = new Set<number>()
+    relevantRels.forEach(r => {
+      if (itemIds.has(r.fromItemId)) relatedIds.add(r.toItemId)
+      if (itemIds.has(r.toItemId)) relatedIds.add(r.fromItemId)
+    })
+    const relatedItems = await db.items.bulkGet(Array.from(relatedIds))
+    const map = new Map<number, ItemRecord>()
+    relatedItems.forEach(item => {
+      if (item) map.set(item.id!, item)
+    })
+    setRelatedItemsMap(map)
   }
 
   useEffect(() => {
@@ -80,6 +102,8 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
               <th className="py-2 pr-2">Primary SME</th>
               <th className="py-2 pr-2">Secondary SMEs</th>
               <th className="py-2 pr-2">Tags</th>
+              <th className="py-2 pr-2">Related Items</th>
+              <th className="py-2 pr-2">Skills Gaps</th>
               <th className="py-2 pr-2 w-28">Actions</th>
             </tr>
           </thead>
@@ -97,6 +121,29 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
                 <td className="py-2 pr-2">
                   {item.tags.length === 0 ? <span className="text-slate-400">(none)</span> : item.tags.join(', ')}
                 </td>
+                <td className="py-2 pr-2">
+                  {(() => {
+                    const itemRels = relationships.filter(r => r.fromItemId === item.id || r.toItemId === item.id)
+                    if (itemRels.length === 0) return <span className="text-slate-400">(none)</span>
+                    return (
+                      <div className="flex flex-wrap gap-1">
+                        {itemRels.map(r => {
+                          const relatedId = r.fromItemId === item.id ? r.toItemId : r.fromItemId
+                          const relatedItem = relatedItemsMap.get(relatedId)
+                          const relatedLens = LENSES.find(l => l.key === (r.fromItemId === item.id ? r.toLens : r.fromLens))
+                          return (
+                            <span key={r.id} className="px-1.5 py-0.5 rounded text-xs bg-slate-100 dark:bg-slate-800">
+                              {relatedLens?.label || 'Unknown'}: {relatedItem?.name || `#${relatedId}`}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
+                </td>
+                <td className="py-2 pr-2">
+                  {item.skillsGaps || <span className="text-slate-400">(none)</span>}
+                </td>
                 <td className="py-2 pr-2 flex gap-2">
                   <button className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => openEdit(item)}>Edit</button>
                   <button className="px-2 py-1 text-xs rounded border border-red-300 text-red-700 hover:bg-red-50" onClick={() => removeItem(item.id)}>Delete</button>
@@ -105,7 +152,7 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="text-center text-slate-500 py-6">No items</td>
+                <td colSpan={10} className="text-center text-slate-500 py-6">No items</td>
               </tr>
             )}
           </tbody>

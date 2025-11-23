@@ -72,32 +72,6 @@ function App() {
     alert('Import complete')
   }
 
-  async function checkForUpdates() {
-    if ('serviceWorker' in navigator) {
-      try {
-        const registration = await navigator.serviceWorker.getRegistration()
-        if (registration) {
-          await registration.update()
-          // Force reload if update is available
-          if (registration.waiting) {
-            if (confirm('Update available. Reload now?')) {
-              window.location.reload()
-            }
-          } else {
-            alert('You are using the latest version.')
-          }
-        }
-      } catch (error) {
-        console.error('Error checking for updates:', error)
-        alert('Error checking for updates. Try refreshing the page.')
-      }
-    } else {
-      // Fallback: just reload
-      if (confirm('Reload page to check for updates?')) {
-        window.location.reload()
-      }
-    }
-  }
 
   return (
     <div className="h-screen w-screen flex bg-slate-50 dark:bg-slate-900">
@@ -127,7 +101,6 @@ function App() {
                 const f = e.target.files?.[0]; if (f) onImport(f)
               }} />
             </label>
-            <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={checkForUpdates} title="Check for app updates">Update</button>
           </div>
         </header>
         <div className="grid grid-cols-1 gap-4">

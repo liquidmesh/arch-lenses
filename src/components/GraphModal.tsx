@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db } from '../db'
-import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord } from '../types'
+import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus } from '../types'
 import { Modal } from './Modal'
 import { ItemDialog } from './ItemDialog'
 
@@ -129,6 +129,24 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
     }
     const hue = Math.abs(hash) % 360
     return `hsl(${hue}, 70%, 50%)`
+  }
+
+  // Get colors based on lifecycle status
+  function getLifecycleColor(status?: LifecycleStatus): { fill: string; stroke: string } {
+    switch (status) {
+      case 'Plan':
+        return { fill: '#f3f4f6', stroke: '#9ca3af' } // Grey
+      case 'Emerging':
+        return { fill: '#fef3c7', stroke: '#f59e0b' } // Yellow/amber
+      case 'Invest':
+        return { fill: '#d1fae5', stroke: '#10b981' } // Green
+      case 'Divest':
+        return { fill: '#fee2e2', stroke: '#ef4444' } // Red
+      case 'Stable':
+        return { fill: '#f0f9ff', stroke: '#38bdf8' } // Blue (default)
+      default:
+        return { fill: '#f0f9ff', stroke: '#38bdf8' } // Light blue (default)
+    }
   }
 
   return (
@@ -268,9 +286,10 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
             }
             strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
           } else if (viewMode === 'summary') {
-            // Summary view: neutral colors
-            fillColor = isActive ? "#e0f2fe" : "#f0f9ff"
-            strokeColor = isActive ? "#0ea5e9" : "#38bdf8"
+            // Summary view: color by lifecycle status
+            const lifecycleColors = getLifecycleColor(n.lifecycleStatus)
+            fillColor = isActive ? lifecycleColors.fill : lifecycleColors.fill
+            strokeColor = isActive ? lifecycleColors.stroke : lifecycleColors.stroke
             strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
           } else {
             // Skill Gaps view: original logic

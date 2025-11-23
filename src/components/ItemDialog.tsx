@@ -15,6 +15,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
   const isNew = !item?.id
   const [name, setName] = useState(item?.name || '')
   const [description, setDescription] = useState(item?.description || '')
+  const [lifecycleStatus, setLifecycleStatus] = useState(item?.lifecycleStatus || '')
   const [businessContact, setBusinessContact] = useState(item?.businessContact || '')
   const [techContact, setTechContact] = useState(item?.techContact || '')
   const [primaryArchitect, setPrimaryArchitect] = useState(item?.primaryArchitect || '')
@@ -30,6 +31,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
     // Reset fields on item change
     setName(item?.name || '')
     setDescription(item?.description || '')
+    setLifecycleStatus(item?.lifecycleStatus || '')
     setBusinessContact(item?.businessContact || '')
     setTechContact(item?.techContact || '')
     setPrimaryArchitect(item?.primaryArchitect || '')
@@ -58,6 +60,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
     if (open && isNew) {
       setName('')
       setDescription('')
+      setLifecycleStatus('')
       setBusinessContact('')
       setTechContact('')
       setPrimaryArchitect('')
@@ -141,6 +144,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
           lens,
           name: trimmedName,
           description: description.trim() || undefined,
+          lifecycleStatus: lifecycleStatus || undefined,
           businessContact,
           techContact,
           primaryArchitect,
@@ -154,6 +158,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
         await db.items.update(item!.id!, {
           name: trimmedName,
           description: description.trim() || undefined,
+          lifecycleStatus: lifecycleStatus || undefined,
           businessContact,
           techContact,
           primaryArchitect,
@@ -185,6 +190,16 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
         </Field>
         <Field label="Description">
           <textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" rows={4} placeholder="Enter a description of this item..." />
+        </Field>
+        <Field label="Lifecycle Status">
+          <select value={lifecycleStatus} onChange={e => setLifecycleStatus(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700">
+            <option value="">(None)</option>
+            <option value="Plan">Plan</option>
+            <option value="Emerging">Emerging</option>
+            <option value="Invest">Invest</option>
+            <option value="Divest">Divest</option>
+            <option value="Stable">Stable</option>
+          </select>
         </Field>
         <Field label="Business contact">
           <input value={businessContact} onChange={e => setBusinessContact(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" />

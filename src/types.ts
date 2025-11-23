@@ -26,11 +26,14 @@ export const LENSES: LensDefinition[] = [
   { key: 'enablers', label: 'Enablers' },
 ];
 
+export type LifecycleStatus = 'Plan' | 'Emerging' | 'Invest' | 'Divest' | 'Stable'
+
 export interface ItemRecord {
   id?: number;
   lens: LensKey;
   name: string; // unique within lens
   description?: string;
+  lifecycleStatus?: LifecycleStatus;
   businessContact?: string;
   techContact?: string;
   primaryArchitect?: string;

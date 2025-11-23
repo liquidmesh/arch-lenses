@@ -49,11 +49,22 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         // Force update check on every navigation
         navigationPreload: false,
+        // Use a more aggressive update strategy
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
+        // Don't cache the service worker itself
+        dontCacheBustURLsMatching: /^https:\/\/fonts\.googleapis\.com\//,
         runtimeCaching: [
           {
-            // HTML files should always be fetched fresh
+            // HTML files should always be fetched fresh - no cache at all
             urlPattern: /index\.html$/,
             handler: 'NetworkOnly',
+            options: {
+              cacheName: 'html-cache',
+              expiration: {
+                maxEntries: 1,
+                maxAgeSeconds: 0, // Never cache HTML
+              },
+            },
           },
           {
             // Service worker and manifest should always be fresh
@@ -61,22 +72,26 @@ export default defineConfig({
             handler: 'NetworkOnly',
           },
           {
+            // JS and CSS files - very short cache, always check network first
             urlPattern: /\.(?:js|css)$/,
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'static-resources',
+              cacheName: 'static-resources-v2',
               expiration: {
                 maxEntries: 50,
-                maxAgeSeconds: 60 * 60, // 1 hour
+                maxAgeSeconds: 60 * 5, // 5 minutes instead of 1 hour
               },
-              networkTimeoutSeconds: 3,
+              networkTimeoutSeconds: 1, // Faster timeout
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
             },
           },
           {
             urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp|ico)$/,
             handler: 'CacheFirst',
             options: {
-              cacheName: 'images',
+              cacheName: 'images-v2',
               expiration: {
                 maxEntries: 100,
                 maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days

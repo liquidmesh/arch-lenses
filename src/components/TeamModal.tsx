@@ -7,6 +7,8 @@ interface TeamModalProps {
   open: boolean
   onClose: () => void
   view: 'architects' | 'stakeholders'
+  onEditPerson?: (personName: string) => void
+  refreshKey?: number
 }
 
 interface PersonCoverage {
@@ -27,21 +29,23 @@ interface PersonCoverage {
 type CoverageGroup = 'high' | 'medium' | 'low' | 'none' | 'all'
 
 
-export function TeamModal({ open, onClose, view }: TeamModalProps) {
+export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: TeamModalProps) {
   const [items, setItems] = useState<ItemRecord[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
 
+  const loadData = async () => {
+    const [allItems, allMembers] = await Promise.all([
+      db.items.toArray(),
+      db.teamMembers.toArray(),
+    ])
+    setItems(allItems)
+    setTeamMembers(allMembers)
+  }
+
   useEffect(() => {
     if (!open) return
-    ;(async () => {
-      const [allItems, allMembers] = await Promise.all([
-        db.items.toArray(),
-        db.teamMembers.toArray(),
-      ])
-      setItems(allItems)
-      setTeamMembers(allMembers)
-    })()
-  }, [open])
+    loadData()
+  }, [open, refreshKey])
 
   // Calculate coverage for each person
   const personCoverage = useMemo(() => {
@@ -329,7 +333,11 @@ export function TeamModal({ open, onClose, view }: TeamModalProps) {
                           } bg-white dark:bg-slate-900`}
                         >
                           <div className="flex items-center gap-1.5 mb-1.5">
-                            <div className="font-semibold text-sm text-slate-800 dark:text-slate-200">
+                            <div 
+                              className="font-semibold text-sm text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                              onClick={() => onEditPerson?.(person.name)}
+                              title="Click to edit person"
+                            >
                               {person.name}
                             </div>
                             {view === 'architects' && person.hasPrimary && (

@@ -15,6 +15,9 @@ function App() {
   const [diagramOpen, setDiagramOpen] = useState(false)
   const [teamView, setTeamView] = useState<'architects' | 'stakeholders' | null>(null)
   const [teamManagerOpen, setTeamManagerOpen] = useState(false)
+  const [teamManagerPersonName, setTeamManagerPersonName] = useState<string | undefined>(undefined)
+  const [teamModalRefreshKey, setTeamModalRefreshKey] = useState(0)
+  const [teamManagerOpenedFromModal, setTeamManagerOpenedFromModal] = useState(false)
 
   useEffect(() => {
     seedIfEmpty()
@@ -85,7 +88,11 @@ function App() {
             <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => setDiagramOpen(true)}>Diagram</button>
             <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => setTeamView('architects')}>Architecture Team</button>
             <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => setTeamView('stakeholders')}>Stakeholders</button>
-            <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => setTeamManagerOpen(true)}>Manage Team</button>
+            <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => {
+              setTeamManagerPersonName(undefined)
+              setTeamManagerOpenedFromModal(false)
+              setTeamManagerOpen(true)
+            }}>Manage Team</button>
             <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={onExport}>Export</button>
             <label className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 cursor-pointer">
               Import
@@ -107,9 +114,29 @@ function App() {
           open={teamView !== null}
           onClose={() => setTeamView(null)}
           view={teamView}
+          refreshKey={teamModalRefreshKey}
+          onEditPerson={(personName) => {
+            setTeamManagerPersonName(personName)
+            setTeamManagerOpenedFromModal(true)
+            setTeamManagerOpen(true)
+          }}
         />
       )}
-      <TeamManager open={teamManagerOpen} onClose={() => setTeamManagerOpen(false)} />
+      <TeamManager 
+        open={teamManagerOpen} 
+        onClose={() => {
+          setTeamManagerOpen(false)
+          setTeamManagerPersonName(undefined)
+          setTeamManagerOpenedFromModal(false)
+        }}
+        initialPersonName={teamManagerPersonName}
+        autoCloseOnSave={teamManagerOpenedFromModal}
+        onSaved={() => {
+          if (teamManagerOpenedFromModal) {
+            setTeamModalRefreshKey(k => k + 1)
+          }
+        }}
+      />
     </div>
   )
 }

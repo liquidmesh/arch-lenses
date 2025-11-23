@@ -6,9 +6,12 @@ import { Modal } from './Modal'
 interface TeamManagerProps {
   open: boolean
   onClose: () => void
+  initialPersonName?: string
+  onSaved?: () => void
+  autoCloseOnSave?: boolean
 }
 
-export function TeamManager({ open, onClose }: TeamManagerProps) {
+export function TeamManager({ open, onClose, initialPersonName, onSaved, autoCloseOnSave }: TeamManagerProps) {
   const [members, setMembers] = useState<TeamMember[]>([])
   const [editingId, setEditingId] = useState<number | null>(null)
   const [name, setName] = useState('')
@@ -23,8 +26,21 @@ export function TeamManager({ open, onClose }: TeamManagerProps) {
       setSearchQuery('')
       return
     }
-    loadMembers()
-  }, [open])
+    loadMembers().then(async () => {
+      if (initialPersonName) {
+        // Wait a bit for state to update, then find the person
+        const all = await db.teamMembers.toArray()
+        const member = all.find(m => m.name === initialPersonName)
+        if (member) {
+          startEdit(member)
+        } else {
+          // Person doesn't exist in team members, create new entry
+          setName(initialPersonName)
+        }
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialPersonName])
 
   async function loadMembers() {
     const all = await db.teamMembers.toArray()
@@ -63,6 +79,10 @@ export function TeamManager({ open, onClose }: TeamManagerProps) {
       setEditingId(null)
       setName('')
       setManager('')
+      onSaved?.()
+      if (autoCloseOnSave) {
+        onClose()
+      }
     } catch (e) {
       alert('Error saving team member')
     }

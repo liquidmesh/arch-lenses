@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { db } from '../db'
 import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord } from '../types'
 import { Modal } from './Modal'
+import { ItemDialog } from './ItemDialog'
 
 interface GraphModalProps {
   open: boolean
@@ -21,6 +22,18 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
   const [layoutMode, setLayoutMode] = useState<'columns' | 'rows'>('columns')
   const [viewMode, setViewMode] = useState<'skillGaps' | 'tags' | 'summary'>('skillGaps')
   const [zoom, setZoom] = useState(1)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editItem, setEditItem] = useState<ItemRecord | null>(null)
+  const [showInstructions, setShowInstructions] = useState(true)
+
+  // Delay showing instructions by 1 second when selection/hover changes
+  useEffect(() => {
+    setShowInstructions(false)
+    const timer = setTimeout(() => {
+      setShowInstructions(true)
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [selectedItemId, hoveredItemId])
 
   useEffect(() => {
     function update() {
@@ -31,19 +44,24 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
     return () => window.removeEventListener('resize', update)
   }, [])
 
+  async function loadItems() {
+    const [allItems, allRels] = await Promise.all([db.items.toArray(), db.relationships.toArray()])
+    // Filter items to only visible lenses
+    const filteredItems = allItems.filter(item => visible[item.lens])
+    setItems(filteredItems)
+    setRels(allRels)
+  }
+
   useEffect(() => {
     if (!open) {
       setSelectedItemId(null)
       setFieldFilter(null)
+      setShowInstructions(true)
       return
     }
-    ;(async () => {
-      const [allItems, allRels] = await Promise.all([db.items.toArray(), db.relationships.toArray()])
-      // Filter items to only visible lenses
-      const filteredItems = allItems.filter(item => visible[item.lens])
-      setItems(filteredItems)
-      setRels(allRels)
-    })()
+    setShowInstructions(true)
+    loadItems()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, visible])
 
   // Filter items based on field filter (e.g., filter by primaryArchitect, businessContact, etc.)
@@ -125,42 +143,46 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
             <button onClick={() => setFieldFilter(null)} className="px-1 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Clear filter</button>
           </div>
         ) : (
-          <div className="flex items-center gap-2">
-            {selectedItemId ? (
-              <span>Showing relationships for selected item. Click again to deselect.</span>
-            ) : hoveredItemId ? (
-              <span>Hovering over item - showing relationships. Click to select.</span>
-            ) : (
-              <span>Hover over an item to see its relationships. Click to select. Click field values to filter.</span>
+          <>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1 text-xs">
+                <span className="mr-1">View:</span>
+                <select 
+                  value={viewMode} 
+                  onChange={e => setViewMode(e.target.value as 'skillGaps' | 'tags' | 'summary')}
+                  className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                >
+                  <option value="skillGaps">Architecture coverage</option>
+                  <option value="tags">Tags</option>
+                  <option value="summary">Summary</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-1 text-xs">
+                <input type="checkbox" checked={layoutMode === 'rows'} onChange={e => setLayoutMode(e.target.checked ? 'rows' : 'columns')} />
+                Row layout
+              </label>
+              <div className="flex items-center gap-1 border-l border-slate-300 dark:border-slate-700 pl-2">
+                <button onClick={() => setZoom(z => Math.max(0.25, z - 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">−</button>
+                <span className="text-xs min-w-[3rem] text-center">{Math.round(zoom * 100)}%</span>
+                <button onClick={() => setZoom(z => Math.min(2, z + 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">+</button>
+                <button onClick={() => setZoom(1)} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Reset</button>
+              </div>
+            </div>
+            {showInstructions && (
+              <div className="flex items-center gap-2">
+                {selectedItemId ? (
+                  <span>Showing relationships for selected item. Click again to deselect.</span>
+                ) : hoveredItemId ? (
+                  <span>Hovering over item - showing relationships. Click to select.</span>
+                ) : (
+                  <span>Hover over an item to see its relationships. Click to select. Click field values to filter.</span>
+                )}
+              </div>
             )}
-          </div>
+          </>
         )}
-        <div className="ml-auto flex items-center gap-2">
-          <label className="flex items-center gap-1 text-xs">
-            <span className="mr-1">View:</span>
-            <select 
-              value={viewMode} 
-              onChange={e => setViewMode(e.target.value as 'skillGaps' | 'tags' | 'summary')}
-              className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-            >
-              <option value="skillGaps">Architecture coverage</option>
-              <option value="tags">Tags</option>
-              <option value="summary">Summary</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-1 text-xs">
-            <input type="checkbox" checked={layoutMode === 'rows'} onChange={e => setLayoutMode(e.target.checked ? 'rows' : 'columns')} />
-            Row layout
-          </label>
-          <div className="flex items-center gap-1 border-l border-slate-300 dark:border-slate-700 pl-2">
-            <button onClick={() => setZoom(z => Math.max(0.25, z - 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">−</button>
-            <span className="text-xs min-w-[3rem] text-center">{Math.round(zoom * 100)}%</span>
-            <button onClick={() => setZoom(z => Math.min(2, z + 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">+</button>
-            <button onClick={() => setZoom(1)} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Reset</button>
-          </div>
-        </div>
       </div>
-      <div className="overflow-auto w-full h-full" style={{ marginTop: '48px' }}>
+      <div className="overflow-auto w-full h-full" style={{ marginTop: '12px' }}>
         <svg 
           width={layout.width} 
           height={layout.height} 
@@ -268,9 +290,23 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
             >
               <rect x={n.x - layout.nodeWidth / 2} y={n.y - layout.nodeHeight / 2} width={layout.nodeWidth} height={layout.nodeHeight} rx={6} ry={6} fill={fillColor} stroke={strokeColor} strokeWidth={strokeWidth} />
               
-              {/* Name (wrapped) - always shown */}
+              {/* Name (wrapped) - always shown, clickable to edit */}
               {nameLines.map((line, idx) => (
-                <text key={`name-${idx}`} x={n.x} y={n.y - 22 + idx * 11} textAnchor="middle" className="fill-slate-800 dark:fill-slate-200" style={{ fontSize: 12 }}>{line}</text>
+                <text 
+                  key={`name-${idx}`} 
+                  x={n.x} 
+                  y={n.y - 22 + idx * 11} 
+                  textAnchor="middle" 
+                  className="fill-slate-800 dark:fill-slate-200 hover:fill-blue-600 dark:hover:fill-blue-400" 
+                  style={{ fontSize: 12, cursor: 'pointer' }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setEditItem(n)
+                    setEditDialogOpen(true)
+                  }}
+                >
+                  {line}
+                </text>
               ))}
               
               {viewMode === 'summary' && (
@@ -500,6 +536,20 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
         })}
       </svg>
       </div>
+      
+      {/* Edit Dialog */}
+      <ItemDialog
+        open={editDialogOpen}
+        onClose={() => {
+          setEditDialogOpen(false)
+          setEditItem(null)
+        }}
+        lens={editItem?.lens || 'domains'}
+        item={editItem}
+        onSaved={() => {
+          loadItems()
+        }}
+      />
     </Modal>
   )
 }

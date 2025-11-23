@@ -53,18 +53,20 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
         // Don't cache the service worker itself
         dontCacheBustURLsMatching: /^https:\/\/fonts\.googleapis\.com\//,
+        // Add version to force service worker updates
+        additionalManifestEntries: [
+          { url: '/arch-lenses/', revision: Date.now().toString() }
+        ],
         runtimeCaching: [
           {
             // HTML files should always be fetched fresh - no cache at all
             urlPattern: /index\.html$/,
             handler: 'NetworkOnly',
-            options: {
-              cacheName: 'html-cache',
-              expiration: {
-                maxEntries: 1,
-                maxAgeSeconds: 0, // Never cache HTML
-              },
-            },
+          },
+          {
+            // Root path should also always be fresh
+            urlPattern: /^\/arch-lenses\/?$/,
+            handler: 'NetworkOnly',
           },
           {
             // Service worker and manifest should always be fresh

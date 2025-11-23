@@ -5,15 +5,28 @@ import App from './App.tsx'
 
 // Register service worker for PWA (auto-update)
 if ('serviceWorker' in navigator) {
+  // Clear all caches on load to ensure fresh content
+  caches.keys().then(cacheNames => {
+    cacheNames.forEach(cacheName => {
+      // Keep only the latest cache, delete old ones
+      if (cacheName.includes('html-cache') || cacheName.includes('static-resources')) {
+        caches.delete(cacheName)
+      }
+    })
+  })
+
   // dynamic import to avoid build issues if plugin not active
   import('virtual:pwa-register').then(({ registerSW }) => {
     registerSW({
       immediate: true,
       onRegistered(registration) {
-        // Check for updates every 5 minutes
+        // Immediately check for updates
+        registration?.update()
+        
+        // Check for updates every 1 minute (more frequent)
         setInterval(() => {
           registration?.update()
-        }, 5 * 60 * 1000)
+        }, 60 * 1000)
         
         // Also check on page visibility change (when user returns to tab)
         document.addEventListener('visibilitychange', () => {
@@ -21,12 +34,15 @@ if ('serviceWorker' in navigator) {
             registration?.update()
           }
         })
+        
+        // Check on focus
+        window.addEventListener('focus', () => {
+          registration?.update()
+        })
       },
       onNeedRefresh() {
-        // Force reload when update is available
-        if (confirm('A new version is available. Reload now?')) {
-          window.location.reload()
-        }
+        // Force reload when update is available - don't ask, just reload
+        window.location.reload()
       },
       onOfflineReady() {
         console.log('App ready to work offline')

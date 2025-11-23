@@ -47,15 +47,27 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
+        // Force update check on every navigation
+        navigationPreload: false,
         runtimeCaching: [
           {
-            urlPattern: /\.(?:js|css|html)$/,
+            // HTML files should always be fetched fresh
+            urlPattern: /index\.html$/,
+            handler: 'NetworkOnly',
+          },
+          {
+            // Service worker and manifest should always be fresh
+            urlPattern: /\.(?:sw\.js|webmanifest)$/,
+            handler: 'NetworkOnly',
+          },
+          {
+            urlPattern: /\.(?:js|css)$/,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'static-resources',
               expiration: {
                 maxEntries: 50,
-                maxAgeSeconds: 60 * 60, // 1 hour instead of 24 hours
+                maxAgeSeconds: 60 * 60, // 1 hour
               },
               networkTimeoutSeconds: 3,
             },

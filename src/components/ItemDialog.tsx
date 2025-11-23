@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db } from '../db'
-import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord } from '../types'
+import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus } from '../types'
 import { Modal } from './Modal'
 
 interface ItemDialogProps {
@@ -144,7 +144,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
           lens,
           name: trimmedName,
           description: description.trim() || undefined,
-          lifecycleStatus: lifecycleStatus || undefined,
+          lifecycleStatus: (lifecycleStatus || undefined) as LifecycleStatus | undefined,
           businessContact,
           techContact,
           primaryArchitect,
@@ -158,7 +158,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
         await db.items.update(item!.id!, {
           name: trimmedName,
           description: description.trim() || undefined,
-          lifecycleStatus: lifecycleStatus || undefined,
+          lifecycleStatus: (lifecycleStatus || undefined) as LifecycleStatus | undefined,
           businessContact,
           techContact,
           primaryArchitect,

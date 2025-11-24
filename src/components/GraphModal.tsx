@@ -22,7 +22,7 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
   const [hoveredItemId, setHoveredItemId] = useState<number | null>(null)
   const [fieldFilter, setFieldFilter] = useState<{ field: string; value: string } | null>(null)
   const [layoutMode, setLayoutMode] = useState<'columns' | 'rows'>('columns')
-  const [viewMode, setViewMode] = useState<'skillGaps' | 'tags' | 'summary'>('skillGaps')
+  const [viewMode, setViewMode] = useState<'skillGaps' | 'tags' | 'summary'>('summary')
   const [zoom, setZoom] = useState(1)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editItem, setEditItem] = useState<ItemRecord | null>(null)
@@ -210,16 +210,6 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
                 <input type="checkbox" checked={layoutMode === 'rows'} onChange={e => setLayoutMode(e.target.checked ? 'rows' : 'columns')} />
                 Row layout
               </label>
-              {selectedItemId && (
-                <label className="flex items-center gap-1 text-xs border-l border-slate-300 dark:border-slate-700 pl-2">
-                  <input 
-                    type="checkbox" 
-                    checked={filterToRelated} 
-                    onChange={e => setFilterToRelated(e.target.checked)} 
-                  />
-                  Show only related
-                </label>
-              )}
               <div className="flex items-center gap-1 border-l border-slate-300 dark:border-slate-700 pl-2">
                 <button onClick={() => setZoom(z => Math.max(0.25, z - 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">−</button>
                 <span className="text-xs min-w-[3rem] text-center">{Math.round(zoom * 100)}%</span>
@@ -230,7 +220,10 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
             {showInstructions && (
               <div className="flex items-center gap-2">
                 {selectedItemId ? (
-                  <span>Showing relationships for selected item. Click again to deselect.{filterToRelated && ' Filtered to related items only.'}</span>
+                  <span>
+                    Showing relationships for {items.find(i => i.id === selectedItemId)?.name || 'selected item'}. Click again to deselect.
+                    {filterToRelated && ' Filtered to related items only.'}
+                  </span>
                 ) : hoveredItemId ? (
                   <span>Hovering over item - showing relationships. Click to select.</span>
                 ) : (
@@ -333,10 +326,24 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
             strokeColor = isActive ? lifecycleColors.stroke : lifecycleColors.stroke
             strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
           } else {
-            // Skill Gaps view: original logic
+            // Architecture coverage view: color logic
             const hasSkillsGap = !!n.skillsGaps?.trim()
-            fillColor = hasSkillsGap ? (isActive ? "#fecaca" : "#fee2e2") : (isActive ? "#bfdbfe" : "#e0f2fe")
-            strokeColor = hasSkillsGap ? (isActive ? "#dc2626" : "#ef4444") : (isActive ? "#2563eb" : "#3b82f6")
+            const hasPrimaryArchitect = !!n.primaryArchitect?.trim()
+            const hasSecondaryArchitects = n.secondaryArchitects.length > 0
+            
+            // Red: has skills gap OR (no primaryArchitect AND no secondaryArchitects)
+            // Orange: no skills gap AND has secondaryArchitects BUT no primaryArchitect
+            // Blue: normal (has primaryArchitect)
+            if (hasSkillsGap || (!hasPrimaryArchitect && !hasSecondaryArchitects)) {
+              fillColor = isActive ? "#fecaca" : "#fee2e2"
+              strokeColor = isActive ? "#dc2626" : "#ef4444"
+            } else if (!hasSkillsGap && hasSecondaryArchitects && !hasPrimaryArchitect) {
+              fillColor = isActive ? "#fed7aa" : "#ffedd5"
+              strokeColor = isActive ? "#ea580c" : "#f97316"
+            } else {
+              fillColor = isActive ? "#bfdbfe" : "#e0f2fe"
+              strokeColor = isActive ? "#2563eb" : "#3b82f6"
+            }
             strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
           }
           
@@ -349,6 +356,30 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
               style={{ cursor: 'pointer' }}
             >
               <rect x={n.x - layout.nodeWidth / 2} y={n.y - layout.nodeHeight / 2} width={layout.nodeWidth} height={layout.nodeHeight} rx={6} ry={6} fill={fillColor} stroke={strokeColor} strokeWidth={strokeWidth} />
+              
+              {/* Filter icon for selected items - top right corner */}
+              {isSelected && (
+                <foreignObject
+                  x={n.x + layout.nodeWidth / 2 - 20}
+                  y={n.y - layout.nodeHeight / 2 + 2}
+                  width={18}
+                  height={18}
+                >
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setFilterToRelated(!filterToRelated)
+                    }}
+                    className="w-full h-full flex items-center justify-center rounded border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700"
+                    title={filterToRelated ? "Show all items" : "Show only related items"}
+                    style={{ padding: 0, cursor: 'pointer' }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={filterToRelated ? "text-blue-600 dark:text-blue-400" : "text-slate-600 dark:text-slate-400"}>
+                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                    </svg>
+                  </button>
+                </foreignObject>
+              )}
               
               {/* Name (wrapped) - always shown, clickable to edit */}
               {nameLines.map((line, idx) => (

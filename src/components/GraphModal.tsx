@@ -3,16 +3,18 @@ import { db } from '../db'
 import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus } from '../types'
 import { Modal } from './Modal'
 import { ItemDialog } from './ItemDialog'
+import { getOrderedLenses } from '../utils/lensOrder'
 
 interface GraphModalProps {
   open: boolean
   onClose: () => void
   visible: Record<LensKey, boolean>
+  lensOrderKey?: number
 }
 
 type PositionedItem = ItemRecord & { x: number; y: number }
 
-export function GraphModal({ open, onClose, visible }: GraphModalProps) {
+export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalProps) {
   const [items, setItems] = useState<ItemRecord[]>([])
   const [rels, setRels] = useState<RelationshipRecord[]>([])
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
@@ -99,8 +101,8 @@ export function GraphModal({ open, onClose, visible }: GraphModalProps) {
     return relatedIds
   }, [visibleRels, selectedItemId, hoveredItemId])
 
-  // Only include visible lenses in layout
-  const visibleLenses = useMemo(() => LENSES.filter(l => visible[l.key]), [visible])
+  // Only include visible lenses in layout, using custom order
+  const visibleLenses = useMemo(() => getOrderedLenses().filter(l => visible[l.key]), [visible, lensOrderKey])
   const layout = useMemo(() => computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode), [filteredItems, dims, visibleLenses, layoutMode])
 
   function posFor(id?: number) {

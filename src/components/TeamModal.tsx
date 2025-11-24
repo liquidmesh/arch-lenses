@@ -24,6 +24,8 @@ interface PersonCoverage {
   techContactItems: Array<{ item: ItemRecord; lens: string }>
   totalCoverage: number
   hasPrimary: boolean
+  teamItems: Array<{ item: ItemRecord; lens: string }>
+  hasDirectReports: boolean
 }
 
 type CoverageGroup = 'high' | 'medium' | 'low' | 'none' | 'all'
@@ -67,6 +69,8 @@ export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: Tea
           techContactItems: [],
           totalCoverage: 0,
           hasPrimary: false,
+          teamItems: [],
+          hasDirectReports: false,
         })
       })
     }
@@ -92,6 +96,8 @@ export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: Tea
             techContactItems: [],
             totalCoverage: 0,
             hasPrimary: false,
+            teamItems: [],
+            hasDirectReports: false,
           })
         }
         const person = coverage.get(name)!
@@ -118,6 +124,8 @@ export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: Tea
             techContactItems: [],
             totalCoverage: 0,
             hasPrimary: false,
+            teamItems: [],
+            hasDirectReports: false,
           })
         }
         const person = coverage.get(name)!
@@ -174,10 +182,33 @@ export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: Tea
       }
     })
 
-    // Calculate total coverage
+    // Calculate total coverage and team items (for architects view)
     coverage.forEach(person => {
       if (view === 'architects') {
         person.totalCoverage = person.primaryCount + person.secondaryCount
+        
+        // Check if person has direct reports
+        const directReports = teamMembers.filter(m => m.manager === person.name)
+        person.hasDirectReports = directReports.length > 0
+        
+        // Collect team items (items where direct reports are primary or secondary)
+        if (person.hasDirectReports) {
+          const directReportNames = new Set(directReports.map(m => m.name))
+          const teamItemSet = new Set<number>() // Use Set to avoid duplicates
+          
+          items.forEach(item => {
+            const lensLabel = LENSES.find(l => l.key === item.lens)?.label || item.lens
+            // Check if any direct report is primary or secondary architect
+            const isTeamItem = 
+              (item.primaryArchitect && directReportNames.has(item.primaryArchitect.trim())) ||
+              item.secondaryArchitects.some(arch => directReportNames.has(arch.trim()))
+            
+            if (isTeamItem && item.id && !teamItemSet.has(item.id)) {
+              teamItemSet.add(item.id)
+              person.teamItems.push({ item, lens: lensLabel })
+            }
+          })
+        }
       } else {
         person.totalCoverage = person.businessContactCount + person.techContactCount
       }
@@ -377,6 +408,16 @@ export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: Tea
                               {person.primaryItems.length === 0 && person.secondaryItems.length === 0 && (
                                 <div className="text-[10px] text-slate-500 dark:text-slate-400 italic">
                                   No items assigned
+                                </div>
+                              )}
+                              {person.hasDirectReports && person.teamItems.length > 0 && (
+                                <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+                                  <div className="text-[10px] font-medium mb-0.5">Team:</div>
+                                  {person.teamItems.map(({ item, lens }, idx) => (
+                                    <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight">
+                                      • {item.name} ({lens})
+                                    </div>
+                                  ))}
                                 </div>
                               )}
                             </div>

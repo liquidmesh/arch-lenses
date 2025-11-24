@@ -7,6 +7,7 @@ import { seedIfEmpty, db } from './db'
 import { GraphModal } from './components/GraphModal'
 import { TeamModal } from './components/TeamModal'
 import { TeamManager } from './components/TeamManager'
+import { getOrderedLenses } from './utils/lensOrder'
 
 function App() {
   const initialVisible = useMemo(() => Object.fromEntries(LENSES.map(l => [l.key, true])) as Record<LensKey, boolean>, [])
@@ -18,6 +19,7 @@ function App() {
   const [teamManagerPersonName, setTeamManagerPersonName] = useState<string | undefined>(undefined)
   const [teamModalRefreshKey, setTeamModalRefreshKey] = useState(0)
   const [teamManagerOpenedFromModal, setTeamManagerOpenedFromModal] = useState(false)
+  const [lensOrderKey, setLensOrderKey] = useState(0)
 
   useEffect(() => {
     seedIfEmpty()
@@ -75,7 +77,13 @@ function App() {
 
   return (
     <div className="h-screen w-screen flex bg-slate-50 dark:bg-slate-900">
-      <Sidebar visible={visible} onToggle={toggleLens} onShowAll={showAll} onHideAll={hideAll} />
+      <Sidebar 
+        visible={visible} 
+        onToggle={toggleLens} 
+        onShowAll={showAll} 
+        onHideAll={hideAll}
+        onOrderChange={() => setLensOrderKey(k => k + 1)}
+      />
       <main className="flex-1 p-4 overflow-auto">
         <header className="mb-4 flex items-center gap-3">
           <h1 className="text-xl font-semibold">Architecture Lenses</h1>
@@ -103,13 +111,13 @@ function App() {
             </label>
           </div>
         </header>
-        <div className="grid grid-cols-1 gap-4">
-          {LENSES.filter(l => visible[l.key]).map(l => (
+        <div className="grid grid-cols-1 gap-4" key={lensOrderKey}>
+          {getOrderedLenses().filter(l => visible[l.key]).map(l => (
             <LensPanel key={l.key} lens={l.key} title={l.label} query={query} />
           ))}
         </div>
       </main>
-      <GraphModal open={diagramOpen} onClose={() => setDiagramOpen(false)} visible={visible} />
+      <GraphModal open={diagramOpen} onClose={() => setDiagramOpen(false)} visible={visible} lensOrderKey={lensOrderKey} />
       {teamView && (
         <TeamModal
           open={teamView !== null}

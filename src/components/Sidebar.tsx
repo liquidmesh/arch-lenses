@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { type LensKey } from '../types'
 import { getOrderedLenses, saveLensOrder } from '../utils/lensOrder'
 

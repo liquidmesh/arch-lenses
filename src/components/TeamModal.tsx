@@ -150,6 +150,8 @@ export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: Tea
             techContactItems: [],
             totalCoverage: 0,
             hasPrimary: false,
+            teamItems: [],
+            hasDirectReports: false,
           })
         }
         const person = coverage.get(name)!
@@ -174,6 +176,8 @@ export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: Tea
             techContactItems: [],
             totalCoverage: 0,
             hasPrimary: false,
+            teamItems: [],
+            hasDirectReports: false,
           })
         }
         const person = coverage.get(name)!

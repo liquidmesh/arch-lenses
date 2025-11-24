@@ -27,6 +27,7 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editItem, setEditItem] = useState<ItemRecord | null>(null)
   const [showInstructions, setShowInstructions] = useState(true)
+  const [filterToRelated, setFilterToRelated] = useState(false)
 
   // Delay showing instructions by 1 second when selection/hover changes
   useEffect(() => {
@@ -58,6 +59,7 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
     if (!open) {
       setSelectedItemId(null)
       setFieldFilter(null)
+      setFilterToRelated(false)
       setShowInstructions(true)
       return
     }
@@ -66,17 +68,12 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, visible])
 
-  // Filter items based on field filter (e.g., filter by primaryArchitect, businessContact, etc.)
-  const filteredItems = useMemo(() => {
-    if (!fieldFilter) return items
-    return items.filter(item => {
-      const fieldValue = item[fieldFilter.field as keyof ItemRecord]
-      if (Array.isArray(fieldValue)) {
-        return fieldValue.some(v => v === fieldFilter.value || v.includes(fieldFilter.value))
-      }
-      return fieldValue === fieldFilter.value || String(fieldValue || '').includes(fieldFilter.value)
-    })
-  }, [items, fieldFilter])
+  // Clear filter when item is deselected
+  useEffect(() => {
+    if (!selectedItemId) {
+      setFilterToRelated(false)
+    }
+  }, [selectedItemId])
 
   // Filter relationships to only show those related to selected or hovered item
   const visibleRels = useMemo(() => {
@@ -101,8 +98,40 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
     return relatedIds
   }, [visibleRels, selectedItemId, hoveredItemId])
 
+  // Filter items based on field filter and/or related items filter
+  const filteredItems = useMemo(() => {
+    let result = items
+
+    // Apply field filter if active
+    if (fieldFilter) {
+      result = result.filter(item => {
+        const fieldValue = item[fieldFilter.field as keyof ItemRecord]
+        if (Array.isArray(fieldValue)) {
+          return fieldValue.some(v => v === fieldFilter.value || v.includes(fieldFilter.value))
+        }
+        return fieldValue === fieldFilter.value || String(fieldValue || '').includes(fieldFilter.value)
+      })
+    }
+
+    // Apply related items filter if active
+    if (filterToRelated && selectedItemId) {
+      result = result.filter(item => relatedItemIds.has(item.id!))
+    }
+
+    return result
+  }, [items, fieldFilter, filterToRelated, selectedItemId, relatedItemIds])
+
   // Only include visible lenses in layout, using custom order
-  const visibleLenses = useMemo(() => getOrderedLenses().filter(l => visible[l.key]), [visible, lensOrderKey])
+  // When filtering to related items, only show lenses that have items in the filtered set
+  const visibleLenses = useMemo(() => {
+    const ordered = getOrderedLenses().filter(l => visible[l.key])
+    if (filterToRelated && selectedItemId) {
+      // Only include lenses that have at least one item in filteredItems
+      const filteredLensKeys = new Set(filteredItems.map(item => item.lens))
+      return ordered.filter(l => filteredLensKeys.has(l.key))
+    }
+    return ordered
+  }, [visible, lensOrderKey, filterToRelated, selectedItemId, filteredItems])
   const layout = useMemo(() => computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode), [filteredItems, dims, visibleLenses, layoutMode])
 
   function posFor(id?: number) {
@@ -181,6 +210,16 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
                 <input type="checkbox" checked={layoutMode === 'rows'} onChange={e => setLayoutMode(e.target.checked ? 'rows' : 'columns')} />
                 Row layout
               </label>
+              {selectedItemId && (
+                <label className="flex items-center gap-1 text-xs border-l border-slate-300 dark:border-slate-700 pl-2">
+                  <input 
+                    type="checkbox" 
+                    checked={filterToRelated} 
+                    onChange={e => setFilterToRelated(e.target.checked)} 
+                  />
+                  Show only related
+                </label>
+              )}
               <div className="flex items-center gap-1 border-l border-slate-300 dark:border-slate-700 pl-2">
                 <button onClick={() => setZoom(z => Math.max(0.25, z - 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">−</button>
                 <span className="text-xs min-w-[3rem] text-center">{Math.round(zoom * 100)}%</span>
@@ -191,7 +230,7 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
             {showInstructions && (
               <div className="flex items-center gap-2">
                 {selectedItemId ? (
-                  <span>Showing relationships for selected item. Click again to deselect.</span>
+                  <span>Showing relationships for selected item. Click again to deselect.{filterToRelated && ' Filtered to related items only.'}</span>
                 ) : hoveredItemId ? (
                   <span>Hovering over item - showing relationships. Click to select.</span>
                 ) : (

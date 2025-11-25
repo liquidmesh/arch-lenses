@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { db } from '../db'
-import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus } from '../types'
+import { db, getAllLenses } from '../db'
+import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type LensDefinition } from '../types'
 import { ItemDialog } from './ItemDialog'
-import { getOrderedLenses } from '../utils/lensOrder'
+import { getLensOrderSync } from '../utils/lensOrder'
 
 type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes'
 
@@ -29,6 +29,25 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   const [showInstructions, setShowInstructions] = useState(true)
   const [filterToRelated, setFilterToRelated] = useState(false)
   const [showParentBoxes, setShowParentBoxes] = useState(true)
+  const [lenses, setLenses] = useState<LensDefinition[]>([])
+
+  // Load lenses from database
+  useEffect(() => {
+    async function loadLenses() {
+      const dbLenses = await getAllLenses()
+      setLenses(dbLenses.length > 0 ? dbLenses : LENSES)
+    }
+    loadLenses()
+    
+    // Listen for lens updates
+    function handleLensesUpdated() {
+      loadLenses()
+    }
+    window.addEventListener('lensesUpdated', handleLensesUpdated)
+    return () => {
+      window.removeEventListener('lensesUpdated', handleLensesUpdated)
+    }
+  }, [])
 
   // Delay showing instructions by 1 second when selection/hover changes
   useEffect(() => {
@@ -61,6 +80,17 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     loadItems()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible])
+  
+  // Listen for lens updates to reload items
+  useEffect(() => {
+    function handleLensesUpdated() {
+      loadItems()
+    }
+    window.addEventListener('lensesUpdated', handleLensesUpdated)
+    return () => {
+      window.removeEventListener('lensesUpdated', handleLensesUpdated)
+    }
+  }, [])
 
   // Clear filter when item is deselected
   useEffect(() => {
@@ -128,14 +158,20 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   // Only include visible lenses in layout, using custom order
   // When filtering to related items, only show lenses that have items in the filtered set
   const visibleLenses = useMemo(() => {
-    const ordered = getOrderedLenses().filter(l => visible[l.key])
+    const order = getLensOrderSync()
+    const orderMap = new Map(order.map((key, idx) => [key, idx]))
+    const ordered = [...lenses].sort((a, b) => {
+      const aIdx = orderMap.get(a.key) ?? 999
+      const bIdx = orderMap.get(b.key) ?? 999
+      return aIdx - bIdx
+    }).filter(l => visible[l.key])
     if (filterToRelated && selectedItemId) {
       // Only include lenses that have at least one item in filteredItems
       const filteredLensKeys = new Set(filteredItems.map(item => item.lens))
       return ordered.filter(l => filteredLensKeys.has(l.key))
     }
     return ordered
-  }, [visible, lensOrderKey, filterToRelated, selectedItemId, filteredItems])
+  }, [lenses, visible, lensOrderKey, filterToRelated, selectedItemId, filteredItems])
   const layout = useMemo(() => computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode, showParentBoxes), [filteredItems, dims, visibleLenses, layoutMode, showParentBoxes])
 
   function posFor(id?: number) {

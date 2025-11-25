@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { type LensKey } from '../types'
-import { getOrderedLenses, saveLensOrder } from '../utils/lensOrder'
+import { useState, useEffect } from 'react'
+import { type LensKey, type LensDefinition } from '../types'
+import { getLensOrderSync, saveLensOrder } from '../utils/lensOrder'
+import { getAllLenses } from '../db'
 
 interface SidebarProps {
   visible: Record<LensKey, boolean>
@@ -11,7 +12,31 @@ interface SidebarProps {
 }
 
 export function Sidebar({ visible, onToggle, onShowAll, onHideAll, onOrderChange }: SidebarProps) {
-  const [orderedLenses, setOrderedLenses] = useState(getOrderedLenses())
+  const [orderedLenses, setOrderedLenses] = useState<LensDefinition[]>([])
+  
+  useEffect(() => {
+    async function loadLenses() {
+      const dbLenses = await getAllLenses()
+      const order = getLensOrderSync()
+      const orderMap = new Map(order.map((key, idx) => [key, idx]))
+      const ordered = [...dbLenses].sort((a, b) => {
+        const aIdx = orderMap.get(a.key) ?? 999
+        const bIdx = orderMap.get(b.key) ?? 999
+        return aIdx - bIdx
+      })
+      setOrderedLenses(ordered)
+    }
+    loadLenses()
+    
+    // Listen for lens updates
+    function handleLensesUpdated() {
+      loadLenses()
+    }
+    window.addEventListener('lensesUpdated', handleLensesUpdated)
+    return () => {
+      window.removeEventListener('lensesUpdated', handleLensesUpdated)
+    }
+  }, [])
 
   function moveLens(lensKey: LensKey, direction: 'up' | 'down') {
     const currentOrder = orderedLenses.map(l => l.key)
@@ -28,7 +53,19 @@ export function Sidebar({ visible, onToggle, onShowAll, onHideAll, onOrderChange
     }
 
     saveLensOrder(newOrder)
-    setOrderedLenses(getOrderedLenses())
+    // Reload lenses to reflect new order
+    async function reloadLenses() {
+      const dbLenses = await getAllLenses()
+      const order = getLensOrderSync()
+      const orderMap = new Map(order.map((key, idx) => [key, idx]))
+      const ordered = [...dbLenses].sort((a, b) => {
+        const aIdx = orderMap.get(a.key) ?? 999
+        const bIdx = orderMap.get(b.key) ?? 999
+        return aIdx - bIdx
+      })
+      setOrderedLenses(ordered)
+    }
+    reloadLenses()
     onOrderChange?.()
   }
 

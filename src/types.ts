@@ -1,20 +1,16 @@
-export type LensKey =
-  | 'businessUnits'
-  | 'domains'
-  | 'channels'
-  | 'applications'
-  | 'productFamilies'
-  | 'platforms'
-  | 'processes'
-  | 'capabilities'
-  | 'enablers';
+export type LensKey = string; // Now dynamic, can be any string
 
 export interface LensDefinition {
+  id?: number;
   key: LensKey;
   label: string;
+  order: number;
+  createdAt: number;
+  updatedAt: number;
 }
 
-export const LENSES: LensDefinition[] = [
+// Default lenses for initial setup
+export const DEFAULT_LENSES: Omit<LensDefinition, 'id' | 'createdAt' | 'updatedAt' | 'order'>[] = [
   { key: 'businessUnits', label: 'Business Units' },
   { key: 'domains', label: 'Domains' },
   { key: 'channels', label: 'Channels' },
@@ -25,6 +21,15 @@ export const LENSES: LensDefinition[] = [
   { key: 'capabilities', label: 'Capabilities' },
   { key: 'enablers', label: 'Enablers' },
 ];
+
+// Legacy LENSES constant for backward compatibility (will be replaced by database)
+export const LENSES: LensDefinition[] = DEFAULT_LENSES.map((l, idx) => ({
+  ...l,
+  id: idx,
+  order: idx,
+  createdAt: 0,
+  updatedAt: 0,
+}));
 
 export type LifecycleStatus = 'Plan' | 'Emerging' | 'Invest' | 'Divest' | 'Stable'
 

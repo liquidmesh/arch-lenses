@@ -1,6 +1,8 @@
+type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'manage-lenses'
+
 interface NavigationProps {
-  currentView: 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes'
-  onNavigate: (view: 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes') => void
+  currentView: ViewType
+  onNavigate: (view: ViewType) => void
 }
 
 export function Navigation({ currentView, onNavigate }: NavigationProps) {
@@ -11,6 +13,7 @@ export function Navigation({ currentView, onNavigate }: NavigationProps) {
     { id: 'stakeholders' as const, label: 'Stakeholders' },
     { id: 'manage-team' as const, label: 'Manage Team' },
     { id: 'meeting-notes' as const, label: 'Meeting Notes' },
+    { id: 'manage-lenses' as const, label: 'Manage Lenses' },
   ]
 
   return (

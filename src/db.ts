@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
-import type { ItemRecord, RelationshipRecord, TeamMember, MeetingNote, Task } from './types'
+import type { ItemRecord, RelationshipRecord, TeamMember, MeetingNote, Task, LensDefinition, LensKey } from './types'
+import { DEFAULT_LENSES } from './types'
 
 class ArchLensesDB extends Dexie {
   items!: Table<ItemRecord, number>
@@ -7,6 +8,7 @@ class ArchLensesDB extends Dexie {
   teamMembers!: Table<TeamMember, number>
   meetingNotes!: Table<MeetingNote, number>
   tasks!: Table<Task, number>
+  lenses!: Table<LensDefinition, number>
 
   constructor() {
     super('arch-lenses-db')
@@ -66,17 +68,62 @@ class ArchLensesDB extends Dexie {
       meetingNotes: '++id, dateTime, createdAt, updatedAt',
       tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
     })
+    // Version 9: Add lenses table
+    this.version(9).stores({
+      items: '++id, &[lens+name], lens, name, updatedAt',
+      relationships: '++id, fromLens, fromItemId, toLens, toItemId',
+      teamMembers: '++id, name, manager, updatedAt',
+      meetingNotes: '++id, dateTime, createdAt, updatedAt',
+      tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
+      lenses: '++id, key, order, updatedAt',
+    }).upgrade(async (tx) => {
+      // Migrate default lenses to database
+      const now = Date.now()
+      const existingLenses = await tx.table('lenses').toArray()
+      if (existingLenses.length === 0) {
+        const defaultLenses = DEFAULT_LENSES.map((lens, idx) => ({
+          ...lens,
+          order: idx,
+          createdAt: now,
+          updatedAt: now,
+        }))
+        await tx.table('lenses').bulkAdd(defaultLenses)
+      }
+    })
   }
 }
 
 export const db = new ArchLensesDB()
 
 export async function seedIfEmpty(): Promise<void> {
+  // Seed lenses if empty
+  const lensCount = await db.lenses.count()
+  if (lensCount === 0) {
+    const now = Date.now()
+    const defaultLenses = DEFAULT_LENSES.map((lens, idx) => ({
+      ...lens,
+      order: idx,
+      createdAt: now,
+      updatedAt: now,
+    }))
+    await db.lenses.bulkAdd(defaultLenses)
+  }
+  
   const count = await db.items.count()
   if (count > 0) return
   await db.transaction('rw', db.items, async () => {
     // no-op seeding items
   })
+}
+
+// Helper function to get all lenses
+export async function getAllLenses(): Promise<LensDefinition[]> {
+  return await db.lenses.orderBy('order').toArray()
+}
+
+// Helper function to get lens by key
+export async function getLensByKey(key: LensKey): Promise<LensDefinition | undefined> {
+  return await db.lenses.where('key').equals(key).first()
 }
 
 // Helper function to get all people names (team members + stakeholders from items)

@@ -3,18 +3,21 @@ import './index.css'
 import { Sidebar } from './components/Sidebar'
 import { LensPanel } from './components/LensPanel'
 import { Navigation } from './components/Navigation'
-import { LENSES, type LensKey, type ExportBundle } from './types'
+import { LENSES, type LensKey, type ExportBundle, type LensDefinition } from './types'
 import { seedIfEmpty, db } from './db'
 import { GraphModal } from './components/GraphModal'
 import { TeamModal } from './components/TeamModal'
 import { TeamManager } from './components/TeamManager'
 import { MeetingNotesModal } from './components/MeetingNotesModal'
-import { getOrderedLenses } from './utils/lensOrder'
+import { LensManager } from './components/LensManager'
+import { invalidateLensesCache, getLensOrderSync } from './utils/lensOrder'
+import { getAllLenses } from './db'
 
-type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes'
+type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'manage-lenses'
 
 function App() {
-  const initialVisible = useMemo(() => Object.fromEntries(LENSES.map(l => [l.key, true])) as Record<LensKey, boolean>, [])
+  const [lenses, setLenses] = useState<LensDefinition[]>(LENSES)
+  const initialVisible = useMemo(() => Object.fromEntries(lenses.map(l => [l.key, true])) as Record<LensKey, boolean>, [lenses])
   const [visible, setVisible] = useState<Record<LensKey, boolean>>(initialVisible)
   const [query, setQuery] = useState('')
   const [currentView, setCurrentView] = useState<ViewType>('main')
@@ -23,9 +26,55 @@ function App() {
   const [lensOrderKey, setLensOrderKey] = useState(0)
   const [meetingNoteToOpen, setMeetingNoteToOpen] = useState<number | undefined>(undefined)
 
+  async function reloadLenses() {
+    invalidateLensesCache()
+    const dbLenses = await getAllLenses()
+    if (dbLenses.length > 0) {
+      setLenses(dbLenses)
+      // Update visible state for any new lenses
+      setVisible(v => {
+        const newVisible = { ...v }
+        dbLenses.forEach(l => {
+          if (!(l.key in newVisible)) {
+            newVisible[l.key] = true
+          }
+        })
+        return newVisible
+      })
+    }
+    setLensOrderKey(k => k + 1)
+  }
+
   useEffect(() => {
-    seedIfEmpty()
+    async function init() {
+      await seedIfEmpty()
+      // Load lenses from database
+      const dbLenses = await getAllLenses()
+      if (dbLenses.length > 0) {
+        setLenses(dbLenses)
+        setVisible(Object.fromEntries(dbLenses.map(l => [l.key, true])) as Record<LensKey, boolean>)
+      }
+    }
+    init()
   }, [])
+  
+  // Listen for lens updates
+  useEffect(() => {
+    function handleLensesUpdated() {
+      reloadLenses()
+    }
+    window.addEventListener('lensesUpdated', handleLensesUpdated)
+    return () => {
+      window.removeEventListener('lensesUpdated', handleLensesUpdated)
+    }
+  }, [])
+  
+  // Reload lenses when returning from manage-lenses view
+  useEffect(() => {
+    if (currentView === 'main') {
+      reloadLenses()
+    }
+  }, [currentView])
 
   useEffect(() => {
     function handleOpenMeetingNote(event: CustomEvent<{ noteId: number }>) {
@@ -44,11 +93,11 @@ function App() {
   }
 
   function showAll() {
-    setVisible(Object.fromEntries(LENSES.map(l => [l.key, true])) as Record<LensKey, boolean>)
+    setVisible(Object.fromEntries(lenses.map(l => [l.key, true])) as Record<LensKey, boolean>)
   }
 
   function hideAll() {
-    setVisible(Object.fromEntries(LENSES.map(l => [l.key, false])) as Record<LensKey, boolean>)
+    setVisible(Object.fromEntries(lenses.map(l => [l.key, false])) as Record<LensKey, boolean>)
   }
 
   async function onExport() {
@@ -144,9 +193,19 @@ function App() {
                 </div>
               </header>
               <div className="grid grid-cols-1 gap-4" key={lensOrderKey}>
-                {getOrderedLenses().filter(l => visible[l.key]).map(l => (
-                  <LensPanel key={l.key} lens={l.key} title={l.label} query={query} />
-                ))}
+                {(() => {
+                  // Use lenses from state (loaded from database) instead of static getOrderedLenses()
+                  const order = getLensOrderSync()
+                  const orderMap = new Map(order.map((key, idx) => [key, idx]))
+                  const orderedLenses = [...lenses].sort((a, b) => {
+                    const aIdx = orderMap.get(a.key) ?? 999
+                    const bIdx = orderMap.get(b.key) ?? 999
+                    return aIdx - bIdx
+                  })
+                  return orderedLenses.filter(l => visible[l.key]).map(l => (
+                    <LensPanel key={l.key} lens={l.key} title={l.label} query={query} />
+                  ))
+                })()}
               </div>
             </main>
           </>
@@ -209,6 +268,9 @@ function App() {
             }}
             onNavigate={handleNavigate}
           />
+        )}
+        {currentView === 'manage-lenses' && (
+          <LensManager onNavigate={handleNavigate} />
         )}
       </div>
     </div>

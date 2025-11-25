@@ -19,6 +19,7 @@ export function MeetingNotesModal({ initialNoteId, onNoteDialogClose, onNavigate
   const [tasks, setTasks] = useState<Map<number, Task[]>>(new Map())
   const [refreshKey, setRefreshKey] = useState(0)
   const [itemMap, setItemMap] = useState<Map<number, { name: string; lens: string }>>(new Map())
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     loadNotes()
@@ -217,7 +218,14 @@ export function MeetingNotesModal({ initialNoteId, onNoteDialogClose, onNavigate
         {/* Left side: Note list */}
         <div className="w-80 border-r border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden">
           <div className="p-3 border-b border-slate-200 dark:border-slate-800">
-            <div className="text-sm text-slate-600 dark:text-slate-400">
+            <input
+              type="text"
+              placeholder="Search notes and tasks..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full px-2 py-1.5 text-sm rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+            />
+            <div className="text-sm text-slate-600 dark:text-slate-400 mt-2">
               {notes.length} meeting note{notes.length !== 1 ? 's' : ''}
             </div>
           </div>
@@ -228,20 +236,46 @@ export function MeetingNotesModal({ initialNoteId, onNoteDialogClose, onNavigate
               </div>
             ) : (
               <div className="divide-y divide-slate-200 dark:divide-slate-800">
-                {notes.map(note => (
-                  <button
-                    key={note.id}
-                    onClick={() => handleViewNote(note)}
-                    className={`w-full text-left p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${
-                      viewingNoteId === note.id ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-600' : ''
-                    }`}
-                  >
-                    <div className="font-medium">{note.title || '(Untitled)'}</div>
-                    <div className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                      {formatDateTime(note.dateTime)}
+                {(() => {
+                  const q = searchQuery.toLowerCase().trim()
+                  const filteredNotes = q ? notes.filter(note => {
+                    // Search in title
+                    if (note.title?.toLowerCase().includes(q)) return true
+                    // Search in participants
+                    if (note.participants?.toLowerCase().includes(q)) return true
+                    // Search in content
+                    if (note.content?.toLowerCase().includes(q)) return true
+                    // Search in tasks
+                    const noteTasksList = noteTasks(note.id!)
+                    const taskMatches = noteTasksList.some(task => 
+                      task.description?.toLowerCase().includes(q) ||
+                      task.assignedTo?.toLowerCase().includes(q)
+                    )
+                    if (taskMatches) return true
+                    return false
+                  }) : notes
+                  
+                  return filteredNotes.length === 0 ? (
+                    <div className="p-4 text-center text-slate-500 dark:text-slate-400">
+                      No notes match your search
                     </div>
-                  </button>
-                ))}
+                  ) : (
+                    filteredNotes.map(note => (
+                      <button
+                        key={note.id}
+                        onClick={() => handleViewNote(note)}
+                        className={`w-full text-left p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${
+                          viewingNoteId === note.id ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-600' : ''
+                        }`}
+                      >
+                        <div className="font-medium">{note.title || '(Untitled)'}</div>
+                        <div className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                          {formatDateTime(note.dateTime)}
+                        </div>
+                      </button>
+                    ))
+                  )
+                })()}
               </div>
             )}
           </div>

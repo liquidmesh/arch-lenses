@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { db } from '../db'
-import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type MeetingNote, type Hyperlink } from '../types'
+import { db, getAllItemNames } from '../db'
+import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type MeetingNote, type Hyperlink, type Task } from '../types'
 import { Modal } from './Modal'
 
 interface ItemDialogProps {
@@ -31,6 +31,8 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
   const [rels, setRels] = useState<RelationshipRecord[]>([])
   const [relatedItems, setRelatedItems] = useState<Map<number, ItemRecord>>(new Map())
   const [referencedNotes, setReferencedNotes] = useState<MeetingNote[]>([])
+  const [relatedTasks, setRelatedTasks] = useState<Task[]>([])
+  const [itemMap, setItemMap] = useState<Map<number, { name: string; lens: string }>>(new Map())
 
   useEffect(() => {
     // Reset fields on item change
@@ -59,6 +61,10 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
         setRelatedItems(itemsMap)
         // Load meeting notes that reference this item
         await loadReferencedNotes(itemId)
+        // Load tasks that reference this item
+        await loadRelatedTasks(itemId)
+        // Load item map for task display
+        await loadItemMap()
       }
       loadData()
     } else {
@@ -90,6 +96,25 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
     } else {
       setReferencedNotes([])
     }
+  }
+  
+  async function loadItemMap() {
+    const items = await getAllItemNames()
+    const map = new Map<number, { name: string; lens: string }>()
+    items.forEach(item => {
+      map.set(item.id, { name: item.name, lens: item.lens })
+    })
+    setItemMap(map)
+  }
+  
+  async function loadRelatedTasks(itemId: number) {
+    const allTasks = await db.tasks.toArray()
+    const relevantTasks = allTasks.filter(t => t.itemReferences && t.itemReferences.includes(itemId))
+    setRelatedTasks(relevantTasks)
+  }
+  
+  function lensLabel(lens: string): string {
+    return LENSES.find(l => l.key === lens)?.label || lens
   }
 
   useEffect(() => {
@@ -421,34 +446,95 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
       )}
 
       {!isNew && (
-        <div className="mt-6">
-          <h4 className="font-medium mb-2">Referenced in Meeting Notes</h4>
-          {referencedNotes.length > 0 ? (
-            <div className="space-y-2">
-            {referencedNotes.map(note => (
-              <button
-                key={note.id}
-                onClick={() => onOpenMeetingNote?.(note.id!)}
-                className="w-full text-left text-sm p-2 border border-slate-200 dark:border-slate-800 rounded hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
-              >
-                <div className="font-medium text-blue-600 dark:text-blue-400 hover:underline">
-                  {note.title || '(Untitled)'}
-                </div>
-                <div className="text-slate-600 dark:text-slate-400 text-xs mt-1">
-                  {new Date(note.dateTime).toLocaleString(undefined, {
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </div>
-              </button>
-            ))}
-            </div>
-          ) : (
-            <div className="text-sm text-slate-500 dark:text-slate-400">No meeting notes reference this item</div>
-          )}
+        <div className="mt-6 grid grid-cols-2 gap-4">
+          <div>
+            <h4 className="font-medium mb-2">Referenced in Meeting Notes</h4>
+            {referencedNotes.length > 0 ? (
+              <div className="space-y-2">
+              {referencedNotes.map(note => (
+                <button
+                  key={note.id}
+                  onClick={() => onOpenMeetingNote?.(note.id!)}
+                  className="w-full text-left text-sm p-2 border border-slate-200 dark:border-slate-800 rounded hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                >
+                  <div className="font-medium text-blue-600 dark:text-blue-400 hover:underline">
+                    {note.title || '(Untitled)'}
+                  </div>
+                  <div className="text-slate-600 dark:text-slate-400 text-xs mt-1">
+                    {new Date(note.dateTime).toLocaleString(undefined, {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </div>
+                </button>
+              ))}
+              </div>
+            ) : (
+              <div className="text-sm text-slate-500 dark:text-slate-400">No meeting notes reference this item</div>
+            )}
+          </div>
+          <div>
+            <h4 className="font-medium mb-2">Related Tasks</h4>
+            {relatedTasks.length > 0 ? (
+              <div className="space-y-2">
+              {relatedTasks.map(task => {
+                const note = referencedNotes.find(n => n.id === task.meetingNoteId)
+                return (
+                  <div
+                    key={task.id}
+                    className="w-full text-left text-sm p-2 border border-slate-200 dark:border-slate-800 rounded"
+                  >
+                    <div className={`${task.completedAt ? 'line-through text-slate-500' : ''}`}>
+                      {task.description}
+                    </div>
+                    {task.assignedTo && (
+                      <div className="text-slate-600 dark:text-slate-400 text-xs mt-1">
+                        Assigned to: {task.assignedTo}
+                      </div>
+                    )}
+                    {task.itemReferences && task.itemReferences.length > 0 && (
+                      <div className="text-slate-600 dark:text-slate-400 text-xs mt-1">
+                        {task.itemReferences.map((itemId, idx) => {
+                          const item = itemMap.get(itemId)
+                          return item ? (
+                            <span key={itemId}>
+                              {idx > 0 && ', '}
+                              {lensLabel(item.lens)}: {item.name}
+                            </span>
+                          ) : null
+                        })}
+                      </div>
+                    )}
+                    {note && (
+                      <button
+                        onClick={() => onOpenMeetingNote?.(note.id!)}
+                        className="text-blue-600 dark:text-blue-400 hover:underline text-xs mt-1"
+                      >
+                        {note.title || '(Untitled)'}
+                      </button>
+                    )}
+                    {task.completedAt && (
+                      <div className="text-slate-400 text-xs mt-1">
+                        Completed {new Date(task.completedAt).toLocaleString(undefined, {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              </div>
+            ) : (
+              <div className="text-sm text-slate-500 dark:text-slate-400">No tasks reference this item</div>
+            )}
+          </div>
         </div>
       )}
     </Modal>
@@ -468,6 +554,3 @@ function splitList(s: string): string[] {
   return s.split(',').map(t => t.trim()).filter(Boolean)
 }
 
-function lensLabel(lens: LensKey): string {
-  return LENSES.find(l => l.key === lens)?.label || lens
-}

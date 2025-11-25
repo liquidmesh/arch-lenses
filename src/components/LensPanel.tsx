@@ -72,6 +72,10 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
 
   async function removeItem(id?: number) {
     if (!id) return
+    // Delete all relationships that reference this item (both from and to)
+    await db.relationships.where('fromItemId').equals(id).delete()
+    await db.relationships.where('toItemId').equals(id).delete()
+    // Delete the item
     await db.items.delete(id)
     await load()
   }

@@ -28,6 +28,11 @@ export const LENSES: LensDefinition[] = [
 
 export type LifecycleStatus = 'Plan' | 'Emerging' | 'Invest' | 'Divest' | 'Stable'
 
+export interface Hyperlink {
+  label: string;
+  url: string;
+}
+
 export interface ItemRecord {
   id?: number;
   lens: LensKey;
@@ -40,6 +45,8 @@ export interface ItemRecord {
   secondaryArchitects: string[];
   tags: string[];
   skillsGaps?: string;
+  parent?: string; // Used to group lens items together for display
+  hyperlinks?: Hyperlink[]; // List of hyperlinks to related webpages
   createdAt: number;
   updatedAt: number;
 }
@@ -61,12 +68,36 @@ export interface TeamMember {
   updatedAt: number;
 }
 
+export interface MeetingNote {
+  id?: number;
+  title: string;
+  participants: string; // comma-separated list
+  dateTime: number; // UTC timestamp
+  content: string; // plain text notes
+  relatedItems?: number[]; // array of item ids that are related to this note
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Task {
+  id?: number;
+  meetingNoteId: number;
+  description: string;
+  assignedTo?: string; // person name
+  itemReferences: number[]; // array of item ids
+  completedAt?: number; // UTC timestamp when marked complete
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type ExportBundle = {
   version: 1;
   exportedAt: string;
   items: ItemRecord[];
   relationships: RelationshipRecord[];
   teamMembers?: TeamMember[];
+  meetingNotes?: MeetingNote[];
+  tasks?: Task[];
 };
 
 export function hasGap(item: ItemRecord): boolean {

@@ -1,20 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db } from '../db'
 import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus } from '../types'
-import { Modal } from './Modal'
 import { ItemDialog } from './ItemDialog'
 import { getOrderedLenses } from '../utils/lensOrder'
 
+type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes'
+
 interface GraphModalProps {
-  open: boolean
-  onClose: () => void
   visible: Record<LensKey, boolean>
   lensOrderKey?: number
+  onNavigate: (view: ViewType) => void
 }
 
 type PositionedItem = ItemRecord & { x: number; y: number }
 
-export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalProps) {
+export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: GraphModalProps) {
   const [items, setItems] = useState<ItemRecord[]>([])
   const [rels, setRels] = useState<RelationshipRecord[]>([])
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
@@ -28,6 +28,7 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
   const [editItem, setEditItem] = useState<ItemRecord | null>(null)
   const [showInstructions, setShowInstructions] = useState(true)
   const [filterToRelated, setFilterToRelated] = useState(false)
+  const [showParentBoxes, setShowParentBoxes] = useState(true)
 
   // Delay showing instructions by 1 second when selection/hover changes
   useEffect(() => {
@@ -56,17 +57,10 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
   }
 
   useEffect(() => {
-    if (!open) {
-      setSelectedItemId(null)
-      setFieldFilter(null)
-      setFilterToRelated(false)
-      setShowInstructions(true)
-      return
-    }
     setShowInstructions(true)
     loadItems()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, visible])
+  }, [visible])
 
   // Clear filter when item is deselected
   useEffect(() => {
@@ -107,7 +101,17 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
       result = result.filter(item => {
         const fieldValue = item[fieldFilter.field as keyof ItemRecord]
         if (Array.isArray(fieldValue)) {
-          return fieldValue.some(v => v === fieldFilter.value || v.includes(fieldFilter.value))
+          // Handle arrays of strings (tags, secondaryArchitects) or objects (hyperlinks)
+          return fieldValue.some(v => {
+            if (typeof v === 'string') {
+              return v === fieldFilter.value || v.includes(fieldFilter.value)
+            } else if (v && typeof v === 'object' && 'label' in v && 'url' in v) {
+              // Handle Hyperlink objects
+              const link = v as { label: string; url: string }
+              return link.label.includes(fieldFilter.value) || link.url.includes(fieldFilter.value)
+            }
+            return false
+          })
         }
         return fieldValue === fieldFilter.value || String(fieldValue || '').includes(fieldFilter.value)
       })
@@ -132,7 +136,7 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
     }
     return ordered
   }, [visible, lensOrderKey, filterToRelated, selectedItemId, filteredItems])
-  const layout = useMemo(() => computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode), [filteredItems, dims, visibleLenses, layoutMode])
+  const layout = useMemo(() => computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode, showParentBoxes), [filteredItems, dims, visibleLenses, layoutMode, showParentBoxes])
 
   function posFor(id?: number) {
     if (!id) return { x: 0, y: 0 }
@@ -181,11 +185,9 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="" fullScreen>
-      <div className="absolute top-2 left-0 right-50 mx-auto flex justify-center">
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Architecture Relationship Diagram</h2>
-      </div>
-      <div className="absolute top-10 left-2 z-10 bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded px-2 py-1 text-sm flex items-center gap-3">
+    <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
+      <div className="flex-1 relative overflow-auto">
+      <div className="absolute top-0 left-2 z-10 bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded px-2 py-1 text-sm flex items-center gap-3">
         {fieldFilter ? (
           <div className="flex items-center gap-2">
             <span>Filtered by {fieldFilter.field}: {fieldFilter.value}</span>
@@ -209,6 +211,10 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
               <label className="flex items-center gap-1 text-xs">
                 <input type="checkbox" checked={layoutMode === 'rows'} onChange={e => setLayoutMode(e.target.checked ? 'rows' : 'columns')} />
                 Row layout
+              </label>
+              <label className="flex items-center gap-1 text-xs">
+                <input type="checkbox" checked={showParentBoxes} onChange={e => setShowParentBoxes(e.target.checked)} />
+                Show parent boxes
               </label>
               <div className="flex items-center gap-1 border-l border-slate-300 dark:border-slate-700 pl-2">
                 <button onClick={() => setZoom(z => Math.max(0.25, z - 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">−</button>
@@ -234,7 +240,7 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
           </>
         )}
       </div>
-      <div className="overflow-auto w-full h-full" style={{ marginTop: '12px' }}>
+      <div className="w-full" style={{ paddingTop: '48px' }}>
         <svg 
           width={layout.width} 
           height={layout.height} 
@@ -247,6 +253,29 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
             <rect x={header.x} y={header.y} width={header.width} height={header.height} fill="transparent" stroke="#e2e8f0" />
             <text x={header.x + header.width / 2} y={header.y + 24} textAnchor="middle" className="fill-slate-700" style={{ fontSize: 14, fontWeight: 600 }}>{header.label}</text>
             <line x1={header.x} y1={header.y + 32} x2={header.x + header.width} y2={header.y + 32} stroke="white" />
+          </g>
+        ))}
+        {/* Parent group boxes - render before links and nodes so they appear as background */}
+        {showParentBoxes && layout.parentGroups && layout.parentGroups.map((group, idx) => (
+          <g key={`parent-${group.lens}-${group.parent}-${idx}`}>
+            <rect 
+              x={group.x} 
+              y={group.y} 
+              width={group.width} 
+              height={group.height} 
+              fill="rgba(241, 245, 249, 0.5)" 
+              stroke="#cbd5e1" 
+              strokeWidth={2}
+              rx={4}
+            />
+            <text 
+              x={group.x + 8} 
+              y={group.y + 16} 
+              className="fill-slate-700 dark:fill-slate-300" 
+              style={{ fontSize: 12, fontWeight: 600 }}
+            >
+              {group.parent}
+            </text>
           </g>
         ))}
         {/* Links */}
@@ -630,6 +659,9 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
       
       {/* Edit Dialog */}
       <ItemDialog
+        onOpenMeetingNote={(noteId) => {
+          window.dispatchEvent(new CustomEvent('openMeetingNote', { detail: { noteId } }))
+        }}
         open={editDialogOpen}
         onClose={() => {
           setEditDialogOpen(false)
@@ -641,11 +673,12 @@ export function GraphModal({ open, onClose, visible, lensOrderKey }: GraphModalP
           loadItems()
         }}
       />
-    </Modal>
+      </div>
+    </div>
   )
 }
 
-function computeLayout(items: ItemRecord[], windowW: number, windowH: number, visibleLenses: typeof LENSES, mode: 'columns' | 'rows') {
+function computeLayout(items: ItemRecord[], windowW: number, windowH: number, visibleLenses: typeof LENSES, mode: 'columns' | 'rows', showParentBoxes: boolean = true) {
   const padding = 16
   const availableW = Math.max(320, windowW - padding * 2)
   const availableH = Math.max(240, windowH - padding * 2)
@@ -657,6 +690,7 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
   const nodes: PositionedItem[] = []
   const positions = new Map<number, { x: number; y: number }>()
   const headers: Array<{ key: LensKey; label: string; x: number; y: number; width: number; height: number }> = []
+  const parentGroups: Array<{ parent: string; x: number; y: number; width: number; height: number; lens: LensKey }> = []
 
   if (mode === 'columns') {
     const n = visibleLenses.length
@@ -666,7 +700,6 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     let maxRows = 0
     visibleLenses.forEach((l, idx) => {
       const colItems = items.filter(i => i.lens === l.key)
-      maxRows = Math.max(maxRows, colItems.length)
       
       headers.push({
         key: l.key as LensKey,
@@ -677,12 +710,78 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
         height: topOffset
       })
       
-      colItems.forEach((it, row) => {
-        const x = padding + idx * (colWidth + colGap) + colWidth / 2
-        const y = topOffset + row * (nodeHeight + rowGap) + nodeHeight / 2
-        if (it.id) positions.set(it.id, { x, y })
-        nodes.push({ ...it, x, y })
-      })
+      if (showParentBoxes) {
+        // Group items by parent
+        const itemsByParent = new Map<string | null, ItemRecord[]>()
+        colItems.forEach(item => {
+          const parentKey = item.parent || null
+          if (!itemsByParent.has(parentKey)) {
+            itemsByParent.set(parentKey, [])
+          }
+          itemsByParent.get(parentKey)!.push(item)
+        })
+        // Sort parents (null first, then alphabetically)
+        const sortedParents = Array.from(itemsByParent.keys()).sort((a, b) => {
+          if (a === null) return -1
+          if (b === null) return 1
+          return a.localeCompare(b)
+        })
+        
+        let currentY = topOffset
+        const parentGroupPadding = 2
+        const parentGroupHeaderHeight = 20
+        
+        sortedParents.forEach(parent => {
+          const parentItems = itemsByParent.get(parent)!
+          
+          if (parent !== null && parentItems.length > 0) {
+            // Create parent group box
+            const groupHeight = parentItems.length * (nodeHeight + rowGap) + parentGroupPadding * 2 + parentGroupHeaderHeight
+            const groupX = padding + idx * (colWidth + colGap)
+            const groupY = currentY
+            const groupWidth = colWidth
+            
+            parentGroups.push({
+              parent,
+              x: groupX,
+              y: groupY,
+              width: groupWidth,
+              height: groupHeight,
+              lens: l.key as LensKey
+            })
+            
+            // Position items within parent group
+            parentItems.forEach((it, itemIdx) => {
+              const x = groupX + groupWidth / 2
+              const y = currentY + parentGroupHeaderHeight + parentGroupPadding + itemIdx * (nodeHeight + rowGap) + nodeHeight / 2
+              if (it.id) positions.set(it.id, { x, y })
+              nodes.push({ ...it, x, y })
+            })
+            
+            currentY += groupHeight + rowGap
+          } else {
+            // Items without parent - position normally
+            parentItems.forEach((it, itemIdx) => {
+              const x = padding + idx * (colWidth + colGap) + colWidth / 2
+              const y = currentY + itemIdx * (nodeHeight + rowGap) + nodeHeight / 2
+              if (it.id) positions.set(it.id, { x, y })
+              nodes.push({ ...it, x, y })
+            })
+            currentY += parentItems.length * (nodeHeight + rowGap)
+          }
+          
+          maxRows = Math.max(maxRows, Math.ceil((currentY - topOffset) / (nodeHeight + rowGap)))
+        })
+      } else {
+        // Flat list - no parent grouping
+        colItems.forEach((it, row) => {
+          const x = padding + idx * (colWidth + colGap) + colWidth / 2
+          const y = topOffset + row * (nodeHeight + rowGap) + nodeHeight / 2
+          if (it.id) positions.set(it.id, { x, y })
+          nodes.push({ ...it, x, y })
+        })
+        maxRows = Math.max(maxRows, colItems.length)
+      }
     })
 
     const contentH = topOffset + Math.max(1, maxRows) * (nodeHeight + rowGap) + padding
@@ -692,7 +791,7 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     const height = Math.max(availableH, contentH)
     const nodeWidth = Math.min(200, Math.floor(colWidth * 0.9))
 
-    return { width, height, nodes, positions, headers, nodeWidth, nodeHeight }
+    return { width, height, nodes, positions, headers, nodeWidth, nodeHeight, parentGroups }
   } else {
     // Row layout: lenses as rows
     const rowHeight = nodeHeight + rowGap
@@ -702,10 +801,6 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     
     visibleLenses.forEach((l) => {
       const rowItems = items.filter(i => i.lens === l.key)
-      
-      // Calculate how many rows of items are needed for this lens
-      const itemsPerRow = Math.max(1, Math.floor((availableW - padding * 2) / 170))
-      const numItemRows = Math.ceil(rowItems.length / itemsPerRow)
       
       // Position header for this lens
       headers.push({
@@ -719,31 +814,119 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
       
       currentY += headerHeight + headerGap
       
-      // Position items for this lens
+      const itemsPerRow = Math.max(1, Math.floor((availableW - padding * 2) / 170))
       const itemWidth = Math.floor((availableW - padding * 2 - colGap * (itemsPerRow - 1)) / itemsPerRow)
       
-      rowItems.forEach((it, colIdx) => {
-        const col = colIdx % itemsPerRow
-        const row = Math.floor(colIdx / itemsPerRow)
-        const x = padding + col * (itemWidth + colGap) + itemWidth / 2
-        const y = currentY + row * rowHeight + nodeHeight / 2
-        if (it.id) positions.set(it.id, { x, y })
-        nodes.push({ ...it, x, y })
-      })
-      
-      // Move to next lens position
-      // Items are positioned with center at: currentY + row * rowHeight + nodeHeight / 2
-      // For the last row (row = numItemRows - 1):
-      //   Center: currentY + (numItemRows - 1) * rowHeight + nodeHeight / 2
-      //   Bottom: currentY + (numItemRows - 1) * rowHeight + nodeHeight / 2 + nodeHeight / 2
-      //         = currentY + (numItemRows - 1) * rowHeight + nodeHeight
-      if (numItemRows > 0) {
-        // Calculate the actual bottom edge of the last item in this lens section
-        const lastItemCenterY = currentY + (numItemRows - 1) * rowHeight + nodeHeight / 2
-        const lastItemBottom = lastItemCenterY + nodeHeight / 2
-        currentY = lastItemBottom + 10 // Gap between lens sections
+      if (showParentBoxes) {
+        // Group items by parent
+        const itemsByParent = new Map<string | null, ItemRecord[]>()
+        rowItems.forEach(item => {
+          const parentKey = item.parent || null
+          if (!itemsByParent.has(parentKey)) {
+            itemsByParent.set(parentKey, [])
+          }
+          itemsByParent.get(parentKey)!.push(item)
+        })
+        // Sort parents (null first, then alphabetically)
+        const sortedParents = Array.from(itemsByParent.keys()).sort((a, b) => {
+          if (a === null) return -1
+          if (b === null) return 1
+          return a.localeCompare(b)
+        })
+        
+        const parentGroupPadding = 2
+        const parentGroupHeaderHeight = 20
+        const parentGroupGap = 10 // Gap between parent boxes
+        
+        let currentX = padding
+        let maxYInRow = currentY
+        
+        sortedParents.forEach((parent) => {
+          const parentItems = itemsByParent.get(parent)!
+          
+          if (parent !== null && parentItems.length > 0) {
+            // Calculate items per row within this parent box (use standard item width)
+            const itemsPerRowInBox = Math.max(1, Math.floor((availableW - padding * 2) / 170))
+            const itemWidthInBox = 160 // Standard item width
+            const numItemRows = Math.ceil(parentItems.length / itemsPerRowInBox)
+            
+            // Calculate actual width needed for items (wrap tightly around items)
+            // Use the number of items in the widest row
+            const itemsInWidestRow = Math.min(itemsPerRowInBox, parentItems.length)
+            const itemsWidth = itemsInWidestRow * itemWidthInBox + (itemsInWidestRow - 1) * colGap
+            const groupWidth = itemsWidth + parentGroupPadding * 2
+            const groupHeight = numItemRows * rowHeight + parentGroupPadding * 2 + parentGroupHeaderHeight
+            
+            // Check if we need to start a new row (if this box would overflow)
+            if (currentX + groupWidth > availableW - padding) {
+              currentX = padding
+              currentY = maxYInRow + parentGroupGap
+              maxYInRow = currentY
+            }
+            
+            const groupX = currentX
+            const groupY = currentY
+            
+            parentGroups.push({
+              parent,
+              x: groupX,
+              y: groupY,
+              width: groupWidth,
+              height: groupHeight,
+              lens: l.key as LensKey
+            })
+            
+            // Position items within parent group
+            parentItems.forEach((it, colIdx) => {
+              const col = colIdx % itemsPerRowInBox
+              const row = Math.floor(colIdx / itemsPerRowInBox)
+              const x = groupX + parentGroupPadding + col * (itemWidthInBox + colGap) + itemWidthInBox / 2
+              const y = groupY + parentGroupHeaderHeight + parentGroupPadding + row * rowHeight + nodeHeight / 2
+              if (it.id) positions.set(it.id, { x, y })
+              nodes.push({ ...it, x, y })
+            })
+            
+            // Update max Y for this row
+            maxYInRow = Math.max(maxYInRow, groupY + groupHeight)
+            
+            // Move to next position
+            currentX += groupWidth + parentGroupGap
+          } else {
+            // Items without parent - position normally
+            parentItems.forEach((it, colIdx) => {
+              const col = colIdx % itemsPerRow
+              const row = Math.floor(colIdx / itemsPerRow)
+              const x = padding + col * (itemWidth + colGap) + itemWidth / 2
+              const y = currentY + row * rowHeight + nodeHeight / 2
+              if (it.id) positions.set(it.id, { x, y })
+              nodes.push({ ...it, x, y })
+            })
+            
+            const numItemRows = Math.ceil(parentItems.length / itemsPerRow)
+            if (numItemRows > 0) {
+              currentY += numItemRows * rowHeight + 10 // Gap after items
+              maxYInRow = Math.max(maxYInRow, currentY)
+            }
+          }
+        })
+        
+        // Update currentY to the bottom of the last row of parent boxes
+        currentY = maxYInRow
       } else {
-        currentY += 10 // Just gap if no items
+        // Flat list - no parent grouping
+        rowItems.forEach((it, colIdx) => {
+          const col = colIdx % itemsPerRow
+          const row = Math.floor(colIdx / itemsPerRow)
+          const x = padding + col * (itemWidth + colGap) + itemWidth / 2
+          const y = currentY + row * rowHeight + nodeHeight / 2
+          if (it.id) positions.set(it.id, { x, y })
+          nodes.push({ ...it, x, y })
+        })
+        
+        const numItemRows = Math.ceil(rowItems.length / itemsPerRow)
+        if (numItemRows > 0) {
+          currentY += numItemRows * rowHeight + 10 // Gap after items
+        }
       }
     })
 
@@ -753,6 +936,6 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     const calculatedHeight = currentY + padding + 30 // Extra padding to ensure last row is fully visible
     const height = Math.max(availableH, calculatedHeight)
 
-    return { width, height, nodes, positions, headers, nodeWidth: 160, nodeHeight }
+    return { width, height, nodes, positions, headers, nodeWidth: 160, nodeHeight, parentGroups }
   }
 }

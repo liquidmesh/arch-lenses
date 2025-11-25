@@ -13,6 +13,16 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "@tiptap/extension-color": "^3.11.0",
+    "@tiptap/extension-link": "^3.11.0",
+    "@tiptap/extension-ordered-list": "^3.11.0",
+    "@tiptap/extension-table": "^3.11.0",
+    "@tiptap/extension-table-cell": "^3.11.0",
+    "@tiptap/extension-table-header": "^3.11.0",
+    "@tiptap/extension-table-row": "^3.11.0",
+    "@tiptap/extension-text-style": "^3.11.0",
+    "@tiptap/react": "^3.11.0",
+    "@tiptap/starter-kit": "^3.11.0",
     "clsx": "^2.1.1",
     "dexie": "^4.2.1",
     "react": "^19.1.1",

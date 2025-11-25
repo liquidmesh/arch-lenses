@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { db } from '../db'
-import { type ItemRecord, type TeamMember, LENSES } from '../types'
-import { Modal } from './Modal'
+import { db, getAllItemNames } from '../db'
+import { type ItemRecord, type TeamMember, type MeetingNote, type Task, LENSES } from '../types'
+type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes'
 
 interface TeamModalProps {
-  open: boolean
-  onClose: () => void
   view: 'architects' | 'stakeholders'
   onEditPerson?: (personName: string) => void
   refreshKey?: number
+  onOpenMeetingNote?: (noteId: number) => void
+  onNavigate: (view: ViewType) => void
 }
 
 interface PersonCoverage {
@@ -31,23 +31,37 @@ interface PersonCoverage {
 type CoverageGroup = 'high' | 'medium' | 'low' | 'none' | 'all'
 
 
-export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: TeamModalProps) {
+export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, onNavigate: _onNavigate }: TeamModalProps) {
   const [items, setItems] = useState<ItemRecord[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
+  const [meetingNotes, setMeetingNotes] = useState<MeetingNote[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [itemMap, setItemMap] = useState<Map<number, { name: string; lens: string }>>(new Map())
 
   const loadData = async () => {
-    const [allItems, allMembers] = await Promise.all([
+    const [allItems, allMembers, allNotes, allTasks, itemNames] = await Promise.all([
       db.items.toArray(),
       db.teamMembers.toArray(),
+      db.meetingNotes.toArray(),
+      db.tasks.toArray(),
+      getAllItemNames(),
     ])
     setItems(allItems)
     setTeamMembers(allMembers)
+    setMeetingNotes(allNotes)
+    setTasks(allTasks)
+    
+    // Build item map
+    const map = new Map<number, { name: string; lens: string }>()
+    itemNames.forEach(item => {
+      map.set(item.id, { name: item.name, lens: item.lens })
+    })
+    setItemMap(map)
   }
 
   useEffect(() => {
-    if (!open) return
     loadData()
-  }, [open, refreshKey])
+  }, [refreshKey])
 
   // Calculate coverage for each person
   const personCoverage = useMemo(() => {
@@ -327,8 +341,11 @@ export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: Tea
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={view === 'architects' ? 'Architecture Team Structure' : 'Stakeholder Structure'} fullScreen>
-      <div className="h-full flex flex-col overflow-hidden">
+    <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
+      <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+        <h1 className="text-xl font-semibold">{view === 'architects' ? 'Architecture Team Structure' : 'Stakeholder Structure'}</h1>
+      </div>
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-2">
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 relative">
           <div>
           {Array.from(groupedPeople.entries())
@@ -443,7 +460,7 @@ export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: Tea
                                 </div>
                               )}
                               {person.techContactItems.length > 0 && (
-                                <div>
+                                <div className={person.businessContactItems.length > 0 ? "mb-1" : ""}>
                                   <div className="text-[10px] font-medium mb-0.5">Tech:</div>
                                   {person.techContactItems.map(({ item, lens }, idx) => (
                                     <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight">
@@ -457,6 +474,83 @@ export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: Tea
                                   ))}
                                 </div>
                               )}
+                              
+                              {/* Outstanding Tasks */}
+                              {(() => {
+                                // Find all outstanding tasks from meetings where this stakeholder was a participant
+                                const stakeholderTasks = tasks.filter(task => {
+                                  if (task.completedAt) return false // Only outstanding tasks
+                                  
+                                  const note = meetingNotes.find(n => n.id === task.meetingNoteId)
+                                  if (!note) return false
+                                  
+                                  // Check if stakeholder name appears in participants (comma-separated list)
+                                  const participants = note.participants.split(',').map(p => p.trim().toLowerCase())
+                                  return participants.includes(person.name.toLowerCase())
+                                })
+                                
+                                if (stakeholderTasks.length === 0) return null
+                                
+                                return (
+                                  <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+                                    <div className="text-[10px] font-medium mb-0.5">Outstanding Tasks:</div>
+                                    {stakeholderTasks.map(task => {
+                                      const note = meetingNotes.find(n => n.id === task.meetingNoteId)
+                                      return (
+                                        <div key={task.id} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight mb-1">
+                                          <div className="flex items-start gap-1">
+                                            <button
+                                              onClick={async (e) => {
+                                                e.stopPropagation()
+                                                const now = Date.now()
+                                                await db.tasks.update(task.id!, {
+                                                  completedAt: now,
+                                                  updatedAt: now,
+                                                })
+                                                loadData() // Reload to refresh display
+                                              }}
+                                              className="text-slate-500 hover:text-green-600 flex-shrink-0 mt-0.5"
+                                              title="Mark as complete"
+                                            >
+                                              ○
+                                            </button>
+                                            <div className="flex-1 min-w-0">
+                                              <div className="font-medium">{task.description}</div>
+                                              {task.assignedTo && (
+                                                <div className="text-slate-500">Assigned: {task.assignedTo}</div>
+                                              )}
+                                              {task.itemReferences && task.itemReferences.length > 0 && (
+                                                <div className="text-slate-500">
+                                                  Items: {task.itemReferences.map((itemId, idx) => {
+                                                    const item = itemMap.get(itemId)
+                                                    return item ? (
+                                                      <span key={itemId}>
+                                                        {idx > 0 && ', '}
+                                                        {LENSES.find(l => l.key === item.lens)?.label || item.lens}: {item.name}
+                                                      </span>
+                                                    ) : null
+                                                  })}
+                                                </div>
+                                              )}
+                                              {note && (
+                                                <button
+                                                  onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    onOpenMeetingNote?.(note.id!)
+                                                  }}
+                                                  className="text-blue-600 dark:text-blue-400 hover:underline text-[9px] mt-0.5"
+                                                >
+                                                  {note.title || '(Untitled)'}
+                                                </button>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )
+                              })()}
                             </div>
                           )}
                         </div>
@@ -501,7 +595,7 @@ export function TeamModal({ open, onClose, view, onEditPerson, refreshKey }: Tea
           </div>
         </div>
       </div>
-    </Modal>
+    </div>
   )
 }
 

@@ -2,27 +2,41 @@ import { useEffect, useMemo, useState } from 'react'
 import './index.css'
 import { Sidebar } from './components/Sidebar'
 import { LensPanel } from './components/LensPanel'
+import { Navigation } from './components/Navigation'
 import { LENSES, type LensKey, type ExportBundle } from './types'
 import { seedIfEmpty, db } from './db'
 import { GraphModal } from './components/GraphModal'
 import { TeamModal } from './components/TeamModal'
 import { TeamManager } from './components/TeamManager'
+import { MeetingNotesModal } from './components/MeetingNotesModal'
 import { getOrderedLenses } from './utils/lensOrder'
+
+type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes'
 
 function App() {
   const initialVisible = useMemo(() => Object.fromEntries(LENSES.map(l => [l.key, true])) as Record<LensKey, boolean>, [])
   const [visible, setVisible] = useState<Record<LensKey, boolean>>(initialVisible)
   const [query, setQuery] = useState('')
-  const [diagramOpen, setDiagramOpen] = useState(false)
-  const [teamView, setTeamView] = useState<'architects' | 'stakeholders' | null>(null)
-  const [teamManagerOpen, setTeamManagerOpen] = useState(false)
+  const [currentView, setCurrentView] = useState<ViewType>('main')
   const [teamManagerPersonName, setTeamManagerPersonName] = useState<string | undefined>(undefined)
   const [teamModalRefreshKey, setTeamModalRefreshKey] = useState(0)
-  const [teamManagerOpenedFromModal, setTeamManagerOpenedFromModal] = useState(false)
   const [lensOrderKey, setLensOrderKey] = useState(0)
+  const [meetingNoteToOpen, setMeetingNoteToOpen] = useState<number | undefined>(undefined)
 
   useEffect(() => {
     seedIfEmpty()
+  }, [])
+
+  useEffect(() => {
+    function handleOpenMeetingNote(event: CustomEvent<{ noteId: number }>) {
+      setMeetingNoteToOpen(event.detail.noteId)
+      setCurrentView('meeting-notes')
+    }
+
+    window.addEventListener('openMeetingNote', handleOpenMeetingNote as EventListener)
+    return () => {
+      window.removeEventListener('openMeetingNote', handleOpenMeetingNote as EventListener)
+    }
   }, [])
 
   function toggleLens(lens: LensKey) {
@@ -41,12 +55,16 @@ function App() {
     const items = await db.items.toArray()
     const relationships = await db.relationships.toArray()
     const teamMembers = await db.teamMembers.toArray()
+    const meetingNotes = await db.meetingNotes.toArray()
+    const tasks = await db.tasks.toArray()
     const bundle: ExportBundle = {
       version: 1,
       exportedAt: new Date().toISOString(),
       items,
       relationships,
       teamMembers,
+      meetingNotes,
+      tasks,
     }
     const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -61,91 +79,138 @@ function App() {
     const text = await file.text()
     const data = JSON.parse(text) as ExportBundle
     if (!confirm('Import will replace current data. Continue?')) return
-    await db.transaction('rw', db.items, db.relationships, db.teamMembers, async () => {
+    await db.transaction('rw', [db.items, db.relationships, db.teamMembers, db.meetingNotes, db.tasks], async () => {
       await db.items.clear()
       await db.relationships.clear()
       await db.teamMembers.clear()
+      await db.meetingNotes.clear()
+      await db.tasks.clear()
       await db.items.bulkAdd(data.items)
       await db.relationships.bulkAdd(data.relationships)
       if (data.teamMembers) {
         await db.teamMembers.bulkAdd(data.teamMembers)
       }
+      if (data.meetingNotes) {
+        await db.meetingNotes.bulkAdd(data.meetingNotes)
+      }
+      if (data.tasks) {
+        await db.tasks.bulkAdd(data.tasks)
+      }
     })
     alert('Import complete')
   }
 
+  function handleNavigate(view: ViewType) {
+    setCurrentView(view)
+    // Reset related state when navigating
+    if (view !== 'manage-team') {
+      setTeamManagerPersonName(undefined)
+    }
+    if (view !== 'meeting-notes') {
+      setMeetingNoteToOpen(undefined)
+    }
+  }
 
   return (
-    <div className="h-screen w-screen flex bg-slate-50 dark:bg-slate-900">
-      <Sidebar 
-        visible={visible} 
-        onToggle={toggleLens} 
-        onShowAll={showAll} 
-        onHideAll={hideAll}
-        onOrderChange={() => setLensOrderKey(k => k + 1)}
-      />
-      <main className="flex-1 p-4 overflow-auto">
-        <header className="mb-4 flex items-center gap-3">
-          <h1 className="text-xl font-semibold">Architecture Lenses</h1>
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Global search..."
-            className="ml-4 px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 bg-transparent flex-1 max-w-md"
+    <div className="h-screen w-screen flex flex-col bg-slate-50 dark:bg-slate-900">
+      <Navigation currentView={currentView} onNavigate={handleNavigate} />
+      <div className="flex flex-1 overflow-hidden">
+        {currentView === 'main' && (
+          <>
+            <Sidebar 
+              visible={visible} 
+              onToggle={toggleLens} 
+              onShowAll={showAll} 
+              onHideAll={hideAll}
+              onOrderChange={() => setLensOrderKey(k => k + 1)}
+            />
+            <main className="flex-1 p-4 overflow-auto">
+              <header className="mb-4 flex items-center gap-3">
+                <h1 className="text-xl font-semibold">Architecture Lenses</h1>
+                <input
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Global search..."
+                  className="ml-4 px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 bg-transparent flex-1 max-w-md"
+                />
+                <div className="ml-auto flex gap-2 items-center">
+                  <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={onExport}>Export</button>
+                  <label className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 cursor-pointer">
+                    Import
+                    <input type="file" accept="application/json" className="hidden" onChange={e => {
+                      const f = e.target.files?.[0]; if (f) onImport(f)
+                    }} />
+                  </label>
+                </div>
+              </header>
+              <div className="grid grid-cols-1 gap-4" key={lensOrderKey}>
+                {getOrderedLenses().filter(l => visible[l.key]).map(l => (
+                  <LensPanel key={l.key} lens={l.key} title={l.label} query={query} />
+                ))}
+              </div>
+            </main>
+          </>
+        )}
+        {currentView === 'diagram' && (
+          <GraphModal 
+            visible={visible} 
+            lensOrderKey={lensOrderKey}
+            onNavigate={handleNavigate}
           />
-          <div className="ml-auto flex gap-2 items-center">
-            <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => setDiagramOpen(true)}>Diagram</button>
-            <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => setTeamView('architects')}>Architecture Team</button>
-            <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => setTeamView('stakeholders')}>Stakeholders</button>
-            <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={() => {
-              setTeamManagerPersonName(undefined)
-              setTeamManagerOpenedFromModal(false)
-              setTeamManagerOpen(true)
-            }}>Manage Team</button>
-            <button className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={onExport}>Export</button>
-            <label className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 cursor-pointer">
-              Import
-              <input type="file" accept="application/json" className="hidden" onChange={e => {
-                const f = e.target.files?.[0]; if (f) onImport(f)
-              }} />
-            </label>
-          </div>
-        </header>
-        <div className="grid grid-cols-1 gap-4" key={lensOrderKey}>
-          {getOrderedLenses().filter(l => visible[l.key]).map(l => (
-            <LensPanel key={l.key} lens={l.key} title={l.label} query={query} />
-          ))}
-        </div>
-      </main>
-      <GraphModal open={diagramOpen} onClose={() => setDiagramOpen(false)} visible={visible} lensOrderKey={lensOrderKey} />
-      {teamView && (
-        <TeamModal
-          open={teamView !== null}
-          onClose={() => setTeamView(null)}
-          view={teamView}
-          refreshKey={teamModalRefreshKey}
-          onEditPerson={(personName) => {
-            setTeamManagerPersonName(personName)
-            setTeamManagerOpenedFromModal(true)
-            setTeamManagerOpen(true)
-          }}
-        />
-      )}
-      <TeamManager 
-        open={teamManagerOpen} 
-        onClose={() => {
-          setTeamManagerOpen(false)
-          setTeamManagerPersonName(undefined)
-          setTeamManagerOpenedFromModal(false)
-        }}
-        initialPersonName={teamManagerPersonName}
-        autoCloseOnSave={teamManagerOpenedFromModal}
-        onSaved={() => {
-          if (teamManagerOpenedFromModal) {
-            setTeamModalRefreshKey(k => k + 1)
-          }
-        }}
-      />
+        )}
+        {currentView === 'architects' && (
+          <TeamModal
+            view="architects"
+            refreshKey={teamModalRefreshKey}
+            onOpenMeetingNote={(noteId) => {
+              setMeetingNoteToOpen(noteId)
+              handleNavigate('meeting-notes')
+            }}
+            onEditPerson={(personName) => {
+              setTeamManagerPersonName(personName)
+              handleNavigate('manage-team')
+            }}
+            onNavigate={handleNavigate}
+          />
+        )}
+        {currentView === 'stakeholders' && (
+          <TeamModal
+            view="stakeholders"
+            refreshKey={teamModalRefreshKey}
+            onOpenMeetingNote={(noteId) => {
+              setMeetingNoteToOpen(noteId)
+              handleNavigate('meeting-notes')
+            }}
+            onEditPerson={(personName) => {
+              setTeamManagerPersonName(personName)
+              handleNavigate('manage-team')
+            }}
+            onNavigate={handleNavigate}
+          />
+        )}
+        {currentView === 'manage-team' && (
+          <TeamManager 
+            initialPersonName={teamManagerPersonName}
+            onSaved={() => {
+              setTeamModalRefreshKey(k => k + 1)
+            }}
+            onOpenMeetingNote={(noteId) => {
+              setMeetingNoteToOpen(noteId)
+              handleNavigate('meeting-notes')
+            }}
+            onNavigate={handleNavigate}
+          />
+        )}
+        {currentView === 'meeting-notes' && (
+          <MeetingNotesModal
+            initialNoteId={meetingNoteToOpen}
+            onNoteDialogClose={() => {
+              setMeetingNoteToOpen(undefined)
+            }}
+            onNavigate={handleNavigate}
+          />
+        )}
+      </div>
     </div>
   )
 }

@@ -7,3 +7,81 @@
 html, body, #root {
   height: 100%;
 }
+
+/* Tiptap Editor Styles */
+.ProseMirror {
+  outline: none;
+  min-height: 100%;
+}
+
+.ProseMirror p {
+  margin: 0.5em 0;
+}
+
+.ProseMirror p:first-child {
+  margin-top: 0;
+}
+
+.ProseMirror p:last-child {
+  margin-bottom: 0;
+}
+
+.ProseMirror ul, .ProseMirror ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.ProseMirror a {
+  color: rgb(37 99 235);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.dark .ProseMirror a {
+  color: rgb(96 165 250);
+}
+
+.ProseMirror strong {
+  font-weight: 600;
+}
+
+.ProseMirror em {
+  font-style: italic;
+}
+
+.ProseMirror table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  width: 100%;
+}
+
+.ProseMirror table td,
+.ProseMirror table th {
+  border: 1px solid rgb(203 213 225);
+  padding: 0.5em;
+  min-width: 1em;
+}
+
+.dark .ProseMirror table td,
+.dark .ProseMirror table th {
+  border-color: rgb(51 65 85);
+}
+
+.ProseMirror table th {
+  background-color: rgb(241 245 249);
+  font-weight: 600;
+}
+
+.dark .ProseMirror table th {
+  background-color: rgb(30 41 59);
+}
+
+.ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 1.5em;
+}
+
+.ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 1.5em;
+}

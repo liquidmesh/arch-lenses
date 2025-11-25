@@ -137,9 +137,21 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
                   {(() => {
                     const itemRels = relationships.filter(r => r.fromItemId === item.id || r.toItemId === item.id)
                     if (itemRels.length === 0) return <span className="text-slate-400">(none)</span>
+                    
+                    // Deduplicate by related item ID to avoid showing the same relationship twice
+                    const seenRelatedIds = new Set<number>()
+                    const uniqueRels = itemRels.filter(r => {
+                      const relatedId = r.fromItemId === item.id ? r.toItemId : r.fromItemId
+                      if (seenRelatedIds.has(relatedId)) {
+                        return false
+                      }
+                      seenRelatedIds.add(relatedId)
+                      return true
+                    })
+                    
                     return (
                       <div className="flex flex-wrap gap-1">
-                        {itemRels.map(r => {
+                        {uniqueRels.map(r => {
                           const relatedId = r.fromItemId === item.id ? r.toItemId : r.fromItemId
                           const relatedItem = relatedItemsMap.get(relatedId)
                           const relatedLens = LENSES.find(l => l.key === (r.fromItemId === item.id ? r.toLens : r.fromLens))
@@ -176,7 +188,19 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
         onClose={() => setDialogOpen(false)}
         lens={lens}
         item={dialogItem}
-        onSaved={load}
+        onSaved={async () => {
+          await load()
+          // Update dialogItem if we're editing an existing item
+          if (dialogItem?.id) {
+            const updatedItem = await db.items.get(dialogItem.id)
+            if (updatedItem) {
+              setDialogItem(updatedItem)
+            }
+          }
+        }}
+        onOpenMeetingNote={(noteId) => {
+          window.dispatchEvent(new CustomEvent('openMeetingNote', { detail: { noteId } }))
+        }}
       />
     </section>
   )

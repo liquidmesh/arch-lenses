@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db } from '../db'
-import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus } from '../types'
+import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type MeetingNote, type Hyperlink } from '../types'
 import { Modal } from './Modal'
 
 interface ItemDialogProps {
@@ -9,9 +9,10 @@ interface ItemDialogProps {
   lens: LensKey
   item?: ItemRecord | null
   onSaved?: () => void
+  onOpenMeetingNote?: (noteId: number) => void // Callback to open meeting notes modal
 }
 
-export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogProps) {
+export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNote }: ItemDialogProps) {
   const isNew = !item?.id
   const [name, setName] = useState(item?.name || '')
   const [description, setDescription] = useState(item?.description || '')
@@ -22,10 +23,14 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
   const [secondaryArchitectsText, setSecondaryArchitectsText] = useState((item?.secondaryArchitects || []).join(', '))
   const [tagsText, setTagsText] = useState((item?.tags || []).join(', '))
   const [skillsGaps, setSkillsGaps] = useState(item?.skillsGaps || '')
+  const [parent, setParent] = useState(item?.parent || '')
+  const [hyperlinks, setHyperlinks] = useState<Hyperlink[]>(item?.hyperlinks || [])
+  const [allItems, setAllItems] = useState<ItemRecord[]>([]) // For parent autocomplete
 
   // Relationships (outgoing from this item)
   const [rels, setRels] = useState<RelationshipRecord[]>([])
   const [relatedItems, setRelatedItems] = useState<Map<number, ItemRecord>>(new Map())
+  const [referencedNotes, setReferencedNotes] = useState<MeetingNote[]>([])
 
   useEffect(() => {
     // Reset fields on item change
@@ -38,8 +43,12 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
     setSecondaryArchitectsText((item?.secondaryArchitects || []).join(', '))
     setTagsText((item?.tags || []).join(', '))
     setSkillsGaps(item?.skillsGaps || '')
+    setParent(item?.parent || '')
+    setHyperlinks(item?.hyperlinks || [])
     if (item?.id) {
-      db.relationships.where({ fromItemId: item.id }).toArray().then(async (relationships) => {
+      const itemId = item.id
+      async function loadData() {
+        const relationships = await db.relationships.where({ fromItemId: itemId }).toArray()
         setRels(relationships)
         // Load related items
         const itemsMap = new Map<number, ItemRecord>()
@@ -48,12 +57,40 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
           if (relatedItem) itemsMap.set(rel.toItemId, relatedItem)
         }
         setRelatedItems(itemsMap)
-      })
+        // Load meeting notes that reference this item
+        await loadReferencedNotes(itemId)
+      }
+      loadData()
     } else {
       setRels([])
       setRelatedItems(new Map())
+      setReferencedNotes([])
     }
   }, [item?.id, item])
+
+  async function loadReferencedNotes(itemId: number) {
+    // Find notes that reference this item in two ways:
+    // 1. Tasks that reference this item in their itemReferences array
+    // 2. Notes that have this item in their relatedItems array
+    const allTasks = await db.tasks.toArray()
+    const relevantTasks = allTasks.filter(t => t.itemReferences && t.itemReferences.includes(itemId))
+    const noteIdsFromTasks = Array.from(new Set(relevantTasks.map(t => t.meetingNoteId)))
+    
+    // Find notes with this item in relatedItems
+    const allNotes = await db.meetingNotes.toArray()
+    const notesWithRelatedItem = allNotes.filter(n => n.relatedItems && n.relatedItems.includes(itemId))
+    const noteIdsFromRelated = notesWithRelatedItem.map(n => n.id!).filter((id): id is number => id !== undefined)
+    
+    // Combine both sets of note IDs
+    const allNoteIds = Array.from(new Set([...noteIdsFromTasks, ...noteIdsFromRelated]))
+    
+    if (allNoteIds.length > 0) {
+      const notes = await db.meetingNotes.bulkGet(allNoteIds)
+      setReferencedNotes(notes.filter((n): n is MeetingNote => n !== undefined))
+    } else {
+      setReferencedNotes([])
+    }
+  }
 
   useEffect(() => {
     // Also clear when opening a fresh dialog to add
@@ -67,10 +104,24 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
       setSecondaryArchitectsText('')
       setTagsText('')
       setSkillsGaps('')
+      setParent('')
+      setHyperlinks([])
       setRels([])
       setRelatedItems(new Map())
+      setReferencedNotes([])
     }
   }, [open, isNew])
+
+  // Load all items for parent autocomplete
+  useEffect(() => {
+    async function loadAllItems() {
+      const items = await db.items.toArray()
+      setAllItems(items)
+    }
+    if (open) {
+      loadAllItems()
+    }
+  }, [open])
 
   const lensOptions = useMemo(() => LENSES, [])
   const [targetLens, setTargetLens] = useState<LensKey>('channels')
@@ -151,11 +202,13 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
           secondaryArchitects,
           tags,
           skillsGaps,
+          parent: parent.trim() || undefined,
+          hyperlinks: hyperlinks.length > 0 ? hyperlinks : undefined,
           createdAt: now,
           updatedAt: now,
         })
       } else {
-        await db.items.update(item!.id!, {
+        const updateData: Partial<ItemRecord> = {
           name: trimmedName,
           description: description.trim() || undefined,
           lifecycleStatus: (lifecycleStatus || undefined) as LifecycleStatus | undefined,
@@ -166,7 +219,29 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
           tags,
           skillsGaps,
           updatedAt: now,
-        })
+        }
+        // Only include parent if it has a value
+        if (parent.trim()) {
+          updateData.parent = parent.trim()
+        } else {
+          updateData.parent = undefined
+        }
+        // Only include hyperlinks if there are any
+        if (hyperlinks.length > 0) {
+          // Filter out any hyperlinks with empty label and url
+          const validHyperlinks = hyperlinks.filter(h => h.label.trim() || h.url.trim())
+          updateData.hyperlinks = validHyperlinks.length > 0 ? validHyperlinks : undefined
+        } else {
+          updateData.hyperlinks = undefined
+        }
+        await db.items.update(item!.id!, updateData)
+        // Verify the update worked by reloading the item
+        const updated = await db.items.get(item!.id!)
+        if (updated) {
+          // Update local state to reflect saved values
+          setParent(updated.parent || '')
+          setHyperlinks(updated.hyperlinks && Array.isArray(updated.hyperlinks) ? updated.hyperlinks : [])
+        }
       }
       onSaved?.()
       onClose()
@@ -219,6 +294,91 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
         <Field label="Skills Gaps">
           <textarea value={skillsGaps} onChange={e => setSkillsGaps(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" rows={3} placeholder="Describe any skills gaps..." />
         </Field>
+        <Field label="Parent">
+          <input
+            type="text"
+            value={parent}
+            onChange={e => setParent(e.target.value)}
+            list="parent-list"
+            className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700"
+            placeholder="Parent name for grouping (optional)"
+          />
+          <datalist id="parent-list">
+            {Array.from(new Set(allItems.map(i => i.parent).filter(Boolean))).map(p => (
+              <option key={p} value={p!} />
+            ))}
+          </datalist>
+        </Field>
+        <Field label="Hyperlinks">
+          <div className="space-y-2">
+            {hyperlinks.map((link, index) => {
+              // Show read-only view if both label and URL are filled
+              const isComplete = link.label.trim() && link.url.trim()
+              if (isComplete) {
+                return (
+                  <div key={index} className="flex gap-2 items-center">
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 px-2 py-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      {link.label}
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => setHyperlinks(hyperlinks.filter((_, i) => i !== index))}
+                      className="px-2 py-1 text-sm rounded border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )
+              }
+              // Show editable inputs if incomplete
+              return (
+                <div key={index} className="flex gap-2 items-center">
+                  <input
+                    type="text"
+                    value={link.label}
+                    onChange={e => {
+                      const updated = [...hyperlinks]
+                      updated[index] = { ...updated[index], label: e.target.value }
+                      setHyperlinks(updated)
+                    }}
+                    className="flex-1 px-2 py-1 rounded border border-slate-300 dark:border-slate-700"
+                    placeholder="Label"
+                  />
+                  <input
+                    type="url"
+                    value={link.url}
+                    onChange={e => {
+                      const updated = [...hyperlinks]
+                      updated[index] = { ...updated[index], url: e.target.value }
+                      setHyperlinks(updated)
+                    }}
+                    className="flex-1 px-2 py-1 rounded border border-slate-300 dark:border-slate-700"
+                    placeholder="URL"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setHyperlinks(hyperlinks.filter((_, i) => i !== index))}
+                    className="px-2 py-1 text-sm rounded border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )
+            })}
+            <button
+              type="button"
+              onClick={() => setHyperlinks([...hyperlinks, { label: '', url: '' }])}
+              className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              Add Hyperlink
+            </button>
+          </div>
+        </Field>
       </div>
 
       {!isNew && (
@@ -257,6 +417,38 @@ export function ItemDialog({ open, onClose, lens, item, onSaved }: ItemDialogPro
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {!isNew && (
+        <div className="mt-6">
+          <h4 className="font-medium mb-2">Referenced in Meeting Notes</h4>
+          {referencedNotes.length > 0 ? (
+            <div className="space-y-2">
+            {referencedNotes.map(note => (
+              <button
+                key={note.id}
+                onClick={() => onOpenMeetingNote?.(note.id!)}
+                className="w-full text-left text-sm p-2 border border-slate-200 dark:border-slate-800 rounded hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+              >
+                <div className="font-medium text-blue-600 dark:text-blue-400 hover:underline">
+                  {note.title || '(Untitled)'}
+                </div>
+                <div className="text-slate-600 dark:text-slate-400 text-xs mt-1">
+                  {new Date(note.dateTime).toLocaleString(undefined, {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </div>
+              </button>
+            ))}
+            </div>
+          ) : (
+            <div className="text-sm text-slate-500 dark:text-slate-400">No meeting notes reference this item</div>
+          )}
         </div>
       )}
     </Modal>

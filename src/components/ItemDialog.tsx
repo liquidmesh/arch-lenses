@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { db, getAllItemNames } from '../db'
+import { db, getAllItemNames, getAllPeopleNames } from '../db'
 import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type MeetingNote, type Hyperlink, type Task } from '../types'
 import { Modal } from './Modal'
+import { AutocompleteInput } from './AutocompleteInput'
+import { TaskDialog } from './TaskDialog'
 
 interface ItemDialogProps {
   open: boolean
@@ -10,10 +12,13 @@ interface ItemDialogProps {
   item?: ItemRecord | null
   onSaved?: () => void
   onOpenMeetingNote?: (noteId: number) => void // Callback to open meeting notes modal
+  onEditPerson?: (personName: string) => void // Callback to navigate to person view
 }
 
-export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNote }: ItemDialogProps) {
+export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNote, onEditPerson }: ItemDialogProps) {
   const isNew = !item?.id
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [name, setName] = useState(item?.name || '')
   const [description, setDescription] = useState(item?.description || '')
   const [lifecycleStatus, setLifecycleStatus] = useState(item?.lifecycleStatus || '')
@@ -26,6 +31,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
   const [parent, setParent] = useState(item?.parent || '')
   const [hyperlinks, setHyperlinks] = useState<Hyperlink[]>(item?.hyperlinks || [])
   const [allItems, setAllItems] = useState<ItemRecord[]>([]) // For parent autocomplete
+  const [peopleNames, setPeopleNames] = useState<string[]>([]) // For people autocomplete
 
   // Relationships (outgoing from this item)
   const [rels, setRels] = useState<RelationshipRecord[]>([])
@@ -79,8 +85,8 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
     // 1. Tasks that reference this item in their itemReferences array
     // 2. Notes that have this item in their relatedItems array
     const allTasks = await db.tasks.toArray()
-    const relevantTasks = allTasks.filter(t => t.itemReferences && t.itemReferences.includes(itemId))
-    const noteIdsFromTasks = Array.from(new Set(relevantTasks.map(t => t.meetingNoteId)))
+    const relevantTasks = allTasks.filter(t => t.itemReferences && t.itemReferences.filter((id): id is number => id !== undefined).includes(itemId))
+    const noteIdsFromTasks = Array.from(new Set(relevantTasks.map(t => t.meetingNoteId).filter((id): id is number => id !== undefined)))
     
     // Find notes with this item in relatedItems
     const allNotes = await db.meetingNotes.toArray()
@@ -109,7 +115,16 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
   
   async function loadRelatedTasks(itemId: number) {
     const allTasks = await db.tasks.toArray()
-    const relevantTasks = allTasks.filter(t => t.itemReferences && t.itemReferences.includes(itemId))
+    const relevantTasks = allTasks.filter(t => t.itemReferences && t.itemReferences.filter((id): id is number => id !== undefined).includes(itemId))
+    // Sort: incomplete first, then by creation date (newest first)
+    relevantTasks.sort((a, b) => {
+      const aCompleted = !!a.completedAt
+      const bCompleted = !!b.completedAt
+      if (aCompleted !== bCompleted) {
+        return aCompleted ? 1 : -1
+      }
+      return (b.createdAt || 0) - (a.createdAt || 0)
+    })
     setRelatedTasks(relevantTasks)
   }
   
@@ -137,14 +152,19 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
     }
   }, [open, isNew])
 
-  // Load all items for parent autocomplete
+  // Load all items for parent autocomplete and people names
   useEffect(() => {
     async function loadAllItems() {
       const items = await db.items.toArray()
       setAllItems(items)
     }
+    async function loadPeopleNames() {
+      const names = await getAllPeopleNames()
+      setPeopleNames(names)
+    }
     if (open) {
       loadAllItems()
+      loadPeopleNames()
     }
   }, [open])
 
@@ -302,13 +322,28 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
           </select>
         </Field>
         <Field label="Business contact">
-          <input value={businessContact} onChange={e => setBusinessContact(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" />
+          <AutocompleteInput
+            value={businessContact}
+            onChange={setBusinessContact}
+            suggestions={peopleNames}
+            className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700"
+          />
         </Field>
         <Field label="Tech contact">
-          <input value={techContact} onChange={e => setTechContact(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" />
+          <AutocompleteInput
+            value={techContact}
+            onChange={setTechContact}
+            suggestions={peopleNames}
+            className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700"
+          />
         </Field>
         <Field label="Primary SME Architect">
-          <input value={primaryArchitect} onChange={e => setPrimaryArchitect(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" />
+          <AutocompleteInput
+            value={primaryArchitect}
+            onChange={setPrimaryArchitect}
+            suggestions={peopleNames}
+            className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700"
+          />
         </Field>
         <Field label="Secondary SME Architects (comma separated)">
           <input value={secondaryArchitectsText} onChange={e => setSecondaryArchitectsText(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" />
@@ -446,8 +481,8 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
       )}
 
       {!isNew && (
-        <div className="mt-6 grid grid-cols-2 gap-4">
-          <div>
+        <div className="mt-6 grid grid-cols-3 gap-4">
+          <div className="col-span-1">
             <h4 className="font-medium mb-2">Referenced in Meeting Notes</h4>
             {referencedNotes.length > 0 ? (
               <div className="space-y-2">
@@ -476,23 +511,65 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
               <div className="text-sm text-slate-500 dark:text-slate-400">No meeting notes reference this item</div>
             )}
           </div>
-          <div>
-            <h4 className="font-medium mb-2">Related Tasks</h4>
+          <div className="col-span-2">
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="font-medium">Related Tasks</h4>
+              {!isNew && (
+                <button
+                  onClick={() => {
+                    setEditingTask(null)
+                    setTaskDialogOpen(true)
+                  }}
+                  className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  + Add Task
+                </button>
+              )}
+            </div>
             {relatedTasks.length > 0 ? (
               <div className="space-y-2">
               {relatedTasks.map(task => {
-                const note = referencedNotes.find(n => n.id === task.meetingNoteId)
+                const note = task.meetingNoteId ? referencedNotes.find(n => n.id === task.meetingNoteId) : undefined
+                const isCompleted = !!task.completedAt
                 return (
                   <div
                     key={task.id}
-                    className="w-full text-left text-sm p-2 border border-slate-200 dark:border-slate-800 rounded"
+                    className={`w-full text-left text-sm p-2 border border-slate-200 dark:border-slate-800 rounded flex items-start gap-2 ${
+                      isCompleted ? 'opacity-60' : ''
+                    }`}
                   >
-                    <div className={`${task.completedAt ? 'line-through text-slate-500' : ''}`}>
-                      {task.description}
-                    </div>
+                    <button
+                      onClick={async () => {
+                        const now = Date.now()
+                        await db.tasks.update(task.id!, {
+                          completedAt: isCompleted ? undefined : now,
+                          updatedAt: now,
+                        })
+                        if (item?.id) {
+                          await loadRelatedTasks(item.id)
+                        }
+                      }}
+                      className={`flex-shrink-0 mt-0.5 ${
+                        isCompleted 
+                          ? 'text-green-600 hover:text-slate-500' 
+                          : 'text-slate-500 hover:text-green-600'
+                      }`}
+                      title={isCompleted ? 'Mark as incomplete' : 'Mark as complete'}
+                    >
+                      {isCompleted ? '✓' : '○'}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className={`${isCompleted ? 'line-through text-slate-500' : ''}`}>
+                        {task.description}
+                      </div>
                     {task.assignedTo && (
                       <div className="text-slate-600 dark:text-slate-400 text-xs mt-1">
-                        Assigned to: {task.assignedTo}
+                        Assigned to: <button
+                          onClick={() => onEditPerson?.(task.assignedTo!)}
+                          className="text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          {task.assignedTo}
+                        </button>
                       </div>
                     )}
                     {task.itemReferences && task.itemReferences.length > 0 && (
@@ -516,17 +593,44 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
                         {note.title || '(Untitled)'}
                       </button>
                     )}
-                    {task.completedAt && (
-                      <div className="text-slate-400 text-xs mt-1">
-                        Completed {new Date(task.completedAt).toLocaleString(undefined, {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </div>
-                    )}
+                      {task.completedAt && (
+                        <div className="text-slate-400 text-xs mt-1">
+                          Completed {new Date(task.completedAt).toLocaleString(undefined, {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-shrink-0 flex gap-1 ml-2">
+                      <button
+                        onClick={() => {
+                          setEditingTask(task)
+                          setTaskDialogOpen(true)
+                        }}
+                        className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        title="Edit task"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (confirm('Delete this task?')) {
+                            await db.tasks.delete(task.id!)
+                            if (item?.id) {
+                              await loadRelatedTasks(item.id)
+                            }
+                          }
+                        }}
+                        className="px-2 py-1 text-xs rounded border border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400"
+                        title="Delete task"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 )
               })}
@@ -537,6 +641,21 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
           </div>
         </div>
       )}
+      <TaskDialog
+        open={taskDialogOpen}
+        onClose={() => {
+          setTaskDialogOpen(false)
+          setEditingTask(null)
+        }}
+        onSaved={async () => {
+          if (item?.id) {
+            await loadRelatedTasks(item.id)
+          }
+          setEditingTask(null)
+        }}
+        initialItemId={item?.id}
+        task={editingTask}
+      />
     </Modal>
   )
 }

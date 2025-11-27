@@ -9,10 +9,9 @@ export function Navigation({ currentView, onNavigate }: NavigationProps) {
   const navItems = [
     { id: 'main' as const, label: 'Architecture Lenses' },
     { id: 'diagram' as const, label: 'Architecture Relationship Diagram' },
-    { id: 'architects' as const, label: 'Architecture Team' },
-    { id: 'stakeholders' as const, label: 'Stakeholders' },
+    { id: 'architects' as const, label: 'People' },
     { id: 'manage-team' as const, label: 'Manage Team' },
-    { id: 'meeting-notes' as const, label: 'Meeting Notes' },
+    { id: 'meeting-notes' as const, label: 'Notes' },
     { id: 'manage-lenses' as const, label: 'Manage Lenses' },
   ]
 

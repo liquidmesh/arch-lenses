@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { db } from '../db'
-import { type TeamMember, type MeetingNote, type Task, LENSES, type ItemRecord } from '../types'
+import { type TeamMember, type MeetingNote, type Task, LENSES, type ItemRecord, type TeamType } from '../types'
+import { TaskDialog } from './TaskDialog'
 type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes'
 
 interface TeamManagerProps {
@@ -15,11 +16,15 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
   const [editingId, setEditingId] = useState<number | null>(null)
   const [name, setName] = useState('')
   const [manager, setManager] = useState('')
+  const [team, setTeam] = useState<TeamType>('Architecture')
   const [searchQuery, setSearchQuery] = useState('')
+  const [teamFilter, setTeamFilter] = useState<'All' | 'Architecture' | 'Business Stakeholder' | 'Tech Stakeholder'>('All')
   const [referencedNotes, setReferencedNotes] = useState<MeetingNote[]>([])
   const [assignedTasks, setAssignedTasks] = useState<Task[]>([])
   const [itemMap, setItemMap] = useState<Map<number, { name: string; lens: string }>>(new Map())
   const [allItems, setAllItems] = useState<ItemRecord[]>([])
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
 
   useEffect(() => {
     loadMembers().then(async () => {
@@ -41,7 +46,7 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
 
   async function loadMembers() {
     const all = await db.teamMembers.toArray()
-    setMembers(all)
+    setMembers(all.sort((a, b) => a.name.localeCompare(b.name)))
     
     // Load meeting notes that reference the current person (if editing)
     if (editingId && name) {
@@ -102,8 +107,8 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
     const personTasks = allTasks.filter(task => 
       task.assignedTo?.toLowerCase() === personName.toLowerCase()
     )
-    const taskNoteIds = new Set(personTasks.map(t => t.meetingNoteId))
-    const taskNotes = await db.meetingNotes.bulkGet(Array.from(taskNoteIds))
+    const taskNoteIds = new Set(personTasks.map(t => t.meetingNoteId).filter((id): id is number => id !== undefined))
+    const taskNotes = taskNoteIds.size > 0 ? await db.meetingNotes.bulkGet(Array.from(taskNoteIds)) : []
     
     // Combine and deduplicate by note ID
     const allReferenced = [...participantNotes, ...taskNotes.filter((n): n is MeetingNote => n !== undefined)]
@@ -130,6 +135,7 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
         await db.teamMembers.update(editingId, {
           name: name.trim(),
           manager: manager.trim() || undefined,
+          team: team,
           updatedAt: now,
         })
       } else {
@@ -142,6 +148,7 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
         await db.teamMembers.add({
           name: name.trim(),
           manager: manager.trim() || undefined,
+          team: team,
           createdAt: now,
           updatedAt: now,
         })
@@ -151,6 +158,7 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
       setEditingId(null)
       setName('')
       setManager('')
+      setTeam('Architecture')
       onSaved?.()
       if (savedName) {
         // Reload referenced notes and tasks for the saved person
@@ -172,6 +180,7 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
     setEditingId(member.id!)
     setName(member.name)
     setManager(member.manager || '')
+    setTeam(member.team || 'Architecture')
     await loadReferencedNotes(member.name)
     await loadTasksForPerson(member.name)
   }
@@ -180,13 +189,21 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
     setEditingId(null)
     setName('')
     setManager('')
+    setTeam('Architecture')
   }
 
   // Get unique manager names for autocomplete
   const managerOptions = Array.from(new Set(members.map(m => m.manager).filter(Boolean)))
 
-  // Filter members based on search query
+  // Filter members based on search query and team filter
   const filteredMembers = members.filter(member => {
+    // Apply team filter
+    if (teamFilter !== 'All') {
+      const memberTeam = member.team || 'Architecture'
+      if (memberTeam !== teamFilter) return false
+    }
+    
+    // Apply search query filter
     if (!searchQuery.trim()) return true
     const query = searchQuery.toLowerCase()
     return (
@@ -223,7 +240,7 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
       <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-        <h1 className="text-xl font-semibold">Manage Architecture Team</h1>
+        <h1 className="text-xl font-semibold">Manage Team</h1>
       </div>
       <div className="flex-1 flex min-h-0 p-4 gap-4">
         {/* Left side: Team Members List */}
@@ -235,15 +252,29 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
             {members.length === 0 ? (
               <p className="text-sm text-slate-500 dark:text-slate-400">No team members added yet</p>
             ) : (
-              <div className="mb-3">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className="w-full px-2 py-1.5 text-sm border border-slate-300 dark:border-slate-700 rounded"
-                  placeholder="Search by name or manager..."
-                />
-              </div>
+              <>
+                <div className="mb-3">
+                  <select
+                    value={teamFilter}
+                    onChange={e => setTeamFilter(e.target.value as typeof teamFilter)}
+                    className="w-full px-2 py-1.5 text-sm border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-900"
+                  >
+                    <option value="All">All</option>
+                    <option value="Architecture">Architecture</option>
+                    <option value="Business Stakeholder">Business Stakeholder</option>
+                    <option value="Tech Stakeholder">Tech Stakeholder</option>
+                  </select>
+                </div>
+                <div className="mb-3">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="w-full px-2 py-1.5 text-sm border border-slate-300 dark:border-slate-700 rounded"
+                    placeholder="Search by name or manager..."
+                  />
+                </div>
+              </>
             )}
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">
@@ -334,6 +365,18 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
                     ))}
                   </datalist>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Team</label>
+                  <select
+                    value={team}
+                    onChange={e => setTeam(e.target.value as TeamType)}
+                    className="w-full px-2 py-1 border border-slate-300 dark:border-slate-700 rounded"
+                  >
+                    <option value="Architecture">Architecture</option>
+                    <option value="Business Stakeholder">Business Stakeholder</option>
+                    <option value="Tech Stakeholder">Tech Stakeholder</option>
+                  </select>
+                </div>
               </div>
               {(name || initialPersonName) && relatedItems.length > 0 && (
                 <div>
@@ -376,11 +419,11 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
             {/* Show referenced meeting notes and tasks when editing a person */}
             {(editingId || (initialPersonName && !editingId)) && (referencedNotes.length > 0 || assignedTasks.length > 0) && (
               <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   {/* Meeting Notes Section */}
-                  {referencedNotes.length > 0 && (
-                    <div>
-                      <h4 className="font-medium mb-3 text-sm">Referenced in Meeting Notes</h4>
+                  <div className="col-span-1">
+                    <h4 className="font-medium mb-3 text-sm">Referenced in Meeting Notes</h4>
+                    {referencedNotes.length > 0 ? (
                       <div className="space-y-2 max-h-60 overflow-y-auto">
                         {referencedNotes.map(note => (
                           <button
@@ -403,16 +446,31 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
                           </button>
                         ))}
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="text-sm text-slate-500 dark:text-slate-400">No meeting notes</div>
+                    )}
+                  </div>
                   
                   {/* Tasks Section */}
-                  {assignedTasks.length > 0 && (
-                    <div>
-                      <h4 className="font-medium mb-3 text-sm">Tasks Assigned</h4>
+                  <div className="col-span-2">
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="font-medium text-sm">Tasks Assigned</h4>
+                      {(editingId || (initialPersonName && !editingId)) && (
+                        <button
+                          onClick={() => {
+                            setEditingTask(null)
+                            setTaskDialogOpen(true)
+                          }}
+                          className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700"
+                        >
+                          + Add Task
+                        </button>
+                      )}
+                    </div>
+                    {assignedTasks.length > 0 ? (
                       <div className="space-y-2 max-h-60 overflow-y-auto">
                         {assignedTasks.map((task) => {
-                          const note = referencedNotes.find(n => n.id === task.meetingNoteId)
+                          const note = task.meetingNoteId ? referencedNotes.find(n => n.id === task.meetingNoteId) : undefined
                           const lensLabel = (lens: string) => LENSES.find(l => l.key === lens)?.label || lens
                           const isCompleted = !!task.completedAt
                           
@@ -460,23 +518,62 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
                               {note && (
                                 <button
                                   onClick={() => onOpenMeetingNote?.(note.id!)}
-                                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0 ml-auto"
+                                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0"
                                 >
                                   {note.title || '(Untitled)'}
                                 </button>
                               )}
+                              <div className="flex-shrink-0 flex gap-1 ml-auto">
+                                <button
+                                  onClick={() => {
+                                    setEditingTask(task)
+                                    setTaskDialogOpen(true)
+                                  }}
+                                  className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                  title="Edit task"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (confirm('Delete this task?')) {
+                                      await db.tasks.delete(task.id!)
+                                      await loadTasksForPerson(name || initialPersonName || '')
+                                    }
+                                  }}
+                                  className="px-2 py-1 text-xs rounded border border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400"
+                                  title="Delete task"
+                                >
+                                  Delete
+                                </button>
+                              </div>
                             </div>
                           )
                         })}
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="text-sm text-slate-500 dark:text-slate-400">No tasks assigned</div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
           </div>
         </div>
       </div>
+      <TaskDialog
+        open={taskDialogOpen}
+        onClose={() => {
+          setTaskDialogOpen(false)
+          setEditingTask(null)
+        }}
+        onSaved={async () => {
+          await loadTasksForPerson(name || initialPersonName || '')
+          setEditingTask(null)
+        }}
+        initialAssignedTo={name || initialPersonName}
+        task={editingTask}
+      />
     </div>
   )
 }

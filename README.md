@@ -2,16 +2,24 @@
 
 A professional React-based single-page web application for managing and visualizing an organization's technology architecture estate through multiple lenses.
 
-## Features
+## Overview
 
-- **Nine Architecture Lenses**: Business Units, Domains, Channels, Channel Applications, Product Families, Platforms, Processes, Capabilities, and Enablers
-- **Interactive Diagram**: Full-screen relationship visualization with filtering capabilities
-- **Field-based Filtering**: Click any field value (Business Contact, Tech Contact, Primary/Secondary SME Architects) to filter across all lenses
-- **Bidirectional Relationships**: Link items across lenses with automatic reverse relationship creation
-- **Local-First Storage**: All data stored in browser's IndexedDB (no backend required)
-- **Export/Import**: JSON-based data portability
-- **PWA Support**: Installable Progressive Web App with offline capability
-- **Gap Coverage Indicators**: Visual color coding for incomplete items
+Architecture Lenses provides a comprehensive platform for:
+- **Managing Architecture Items** across multiple dynamic lenses (Business Units, Domains, Channels, Applications, Product Families, Platforms, Processes, Capabilities, Enablers, and custom lenses)
+- **Visualizing Relationships** between architecture items in an interactive diagram
+- **Tracking Team Members** including architects and stakeholders with coverage analysis
+- **Capturing Meeting Notes** with rich text formatting and task management
+- **Managing Tasks** independently or linked to meeting notes, people, or architecture items
+
+**Key Features:**
+- **Local-First Architecture**: All data stored in browser's IndexedDB (no backend required)
+- **Progressive Web App**: Installable, works offline, auto-updates
+- **Selective Export/Import**: Choose what data to export/import (Lenses, People, Notes, or All)
+- **Rich Text Editing**: Full formatting support for meeting notes (bold, italic, lists, tables, links)
+- **Interactive Visualizations**: Multiple view modes for architecture relationship diagram
+- **Comprehensive Filtering**: Filter by team type, manager, tags, lifecycle status, and more
+
+> 📋 **For complete system specification**, see [SPECIFICATION.md](./specification.md)
 
 ## Quick Start
 
@@ -45,12 +53,20 @@ See [GITHUB_SETUP.md](./GITHUB_SETUP.md) for complete instructions.
 arch-lenses/
 ├── src/
 │   ├── components/      # React components
+│   │   ├── Navigation.tsx      # Top navigation
+│   │   ├── LensPanel.tsx      # Lens item lists
+│   │   ├── GraphModal.tsx     # Architecture diagram
+│   │   ├── TeamModal.tsx      # Team structure view
+│   │   ├── TeamManager.tsx    # Team management
+│   │   ├── MeetingNotesModal.tsx # Notes view
+│   │   └── ...                 # Other components
 │   ├── db.ts            # Dexie IndexedDB setup
-│   ├── types.ts         # TypeScript type definitions
-│   └── App.tsx          # Main application
-├── public/              # Static assets
-├── .github/workflows/   # GitHub Actions for auto-deployment
-└── dist/                # Built files (generated)
+│   ├── types.ts          # TypeScript type definitions
+│   └── App.tsx           # Main application router
+├── public/               # Static assets
+├── .github/workflows/    # GitHub Actions for auto-deployment
+├── specification.md       # Complete system specification
+└── dist/                 # Built files (generated)
 ```
 
 ## Technology Stack
@@ -79,10 +95,25 @@ npm run deploy
 
 ## Data Management
 
-- All data is stored locally in each user's browser (IndexedDB)
-- No backend or server required
-- Users can export/import their data via the Export/Import buttons
-- Data is not shared between users or devices
+- **Local Storage**: All data stored in browser's IndexedDB (Dexie.js)
+- **No Backend**: Completely client-side application
+- **Data Portability**: Export/Import functionality with selective data types
+  - Export: Choose All, Lenses, People, or Notes
+  - Import: Selectively replace data types (replaces, not merges)
+- **Privacy**: Data never leaves the user's browser
+- **Isolation**: Each user/browser has separate data store
+
+### Data Model
+
+The system manages:
+- **Lenses**: Dynamic architecture lens definitions
+- **Items**: Architecture items with attributes (description, lifecycle, contacts, architects, tags, etc.)
+- **Relationships**: Bidirectional links between items across lenses
+- **Team Members**: People categorized as Architecture, Business Stakeholder, or Tech Stakeholder
+- **Meeting Notes**: Rich text notes with participants, date/time, and related items
+- **Tasks**: Action items that can be linked to notes, people, or architecture items
+
+See [specification.md](./specification.md) for complete data model documentation.
 
 ## Deployment Options
 
@@ -92,6 +123,16 @@ npm run deploy
 4. **Any static hosting** - Upload `dist/` folder
 
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment options.
+
+## Documentation
+
+- **[SPECIFICATION.md](./specification.md)**: Complete system specification including:
+  - Functional requirements (REQ-*)
+  - Data model specification
+  - User interface specification
+  - Technical architecture
+  - Deployment specification
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)**: Detailed deployment options and instructions
 
 ## License
 

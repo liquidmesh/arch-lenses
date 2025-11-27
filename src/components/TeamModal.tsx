@@ -4,7 +4,6 @@ import { type ItemRecord, type TeamMember, type MeetingNote, type Task, LENSES }
 type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes'
 
 interface TeamModalProps {
-  view: 'architects' | 'stakeholders'
   onEditPerson?: (personName: string) => void
   refreshKey?: number
   onOpenMeetingNote?: (noteId: number) => void
@@ -30,8 +29,31 @@ interface PersonCoverage {
 
 type CoverageGroup = 'high' | 'medium' | 'low' | 'none' | 'all'
 
+// Helper function to group and sort items by lens
+function groupAndSortItems(items: Array<{ item: ItemRecord; lens: string }>): Array<{ lens: string; items: Array<{ item: ItemRecord; lens: string }> }> {
+  // Group by lens
+  const grouped = new Map<string, Array<{ item: ItemRecord; lens: string }>>()
+  items.forEach(({ item, lens }) => {
+    if (!grouped.has(lens)) {
+      grouped.set(lens, [])
+    }
+    grouped.get(lens)!.push({ item, lens })
+  })
+  
+  // Sort items within each group by item name
+  grouped.forEach((items) => {
+    items.sort((a, b) => a.item.name.localeCompare(b.item.name))
+  })
+  
+  // Convert to array and sort by lens name
+  return Array.from(grouped.entries())
+    .map(([lens, items]) => ({ lens, items }))
+    .sort((a, b) => a.lens.localeCompare(b.lens))
+}
 
-export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, onNavigate: _onNavigate }: TeamModalProps) {
+export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavigate: _onNavigate }: TeamModalProps) {
+  const [teamFilter, setTeamFilter] = useState<'Architecture' | 'Business Stakeholders' | 'Tech Stakeholders' | 'All Stakeholders'>('Architecture')
+  const [managerFilter, setManagerFilter] = useState<string>('All')
   const [items, setItems] = useState<ItemRecord[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
   const [meetingNotes, setMeetingNotes] = useState<MeetingNote[]>([])
@@ -67,9 +89,19 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
   const personCoverage = useMemo(() => {
     const coverage = new Map<string, PersonCoverage>()
 
-    // Initialize with team members (for architects view)
-    if (view === 'architects') {
-      teamMembers.forEach(member => {
+    // Initialize with team members based on team filter
+    const shouldIncludeArchitecture = teamFilter === 'Architecture'
+    const shouldIncludeBusiness = teamFilter === 'Business Stakeholders' || teamFilter === 'All Stakeholders'
+    const shouldIncludeTech = teamFilter === 'Tech Stakeholders' || teamFilter === 'All Stakeholders'
+    
+    teamMembers.forEach(member => {
+      const memberTeam = member.team || 'Architecture'
+      const shouldInclude = 
+        (shouldIncludeArchitecture && memberTeam === 'Architecture') ||
+        (shouldIncludeBusiness && memberTeam === 'Business Stakeholder') ||
+        (shouldIncludeTech && memberTeam === 'Tech Stakeholder')
+      
+      if (shouldInclude) {
         coverage.set(member.name, {
           name: member.name,
           manager: member.manager,
@@ -86,8 +118,8 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
           teamItems: [],
           hasDirectReports: false,
         })
-      })
-    }
+      }
+    })
 
     // Process items to calculate coverage
     items.forEach(item => {
@@ -200,9 +232,11 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
       }
     })
 
-    // Calculate total coverage and team items (for architects view)
+    // Calculate total coverage and team items
+    const isArchitectureView = teamFilter === 'Architecture'
+    
     coverage.forEach(person => {
-      if (view === 'architects') {
+      if (isArchitectureView) {
         person.totalCoverage = person.primaryCount + person.secondaryCount
         
         // Check if person has direct reports
@@ -232,32 +266,53 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
       }
     })
 
-    // Filter based on view
-    const filtered = Array.from(coverage.values()).filter(person => {
-      if (view === 'architects') {
-        // Only show people who are architects (have primary or secondary architect roles)
-        // Exclude people who are only business/tech contacts
-        return person.primaryCount > 0 || person.secondaryCount > 0 || teamMembers.some(m => m.name === person.name)
-      } else {
-        // Only show stakeholders (business/tech contacts)
-        // Exclude people who are architects
-        const isArchitect = person.primaryCount > 0 || person.secondaryCount > 0
-        const isStakeholder = person.businessContactCount > 0 || person.techContactCount > 0
-        return isStakeholder && !isArchitect
+    // Filter based on team filter
+    const shouldShowArchitecture = teamFilter === 'Architecture'
+    const shouldShowBusiness = teamFilter === 'Business Stakeholders' || teamFilter === 'All Stakeholders'
+    const shouldShowTech = teamFilter === 'Tech Stakeholders' || teamFilter === 'All Stakeholders'
+    
+    let filtered = Array.from(coverage.values()).filter(person => {
+      const member = teamMembers.find(m => m.name === person.name)
+      const memberTeam = member?.team || 'Architecture'
+      
+      if (shouldShowArchitecture) {
+        // Show architecture team members
+        return memberTeam === 'Architecture' && (person.primaryCount > 0 || person.secondaryCount > 0 || member)
+      } else if (shouldShowBusiness && shouldShowTech) {
+        // Show all stakeholders
+        return (memberTeam === 'Business Stakeholder' || memberTeam === 'Tech Stakeholder') &&
+               (person.businessContactCount > 0 || person.techContactCount > 0)
+      } else if (shouldShowBusiness) {
+        // Show only business stakeholders
+        return memberTeam === 'Business Stakeholder' && person.businessContactCount > 0
+      } else if (shouldShowTech) {
+        // Show only tech stakeholders
+        return memberTeam === 'Tech Stakeholder' && person.techContactCount > 0
       }
+      return false
     })
+    
+    // Apply manager filter
+    if (managerFilter !== 'All') {
+      if (managerFilter === 'Unassigned') {
+        filtered = filtered.filter(person => !person.manager)
+      } else {
+        filtered = filtered.filter(person => person.manager === managerFilter)
+      }
+    }
 
     return filtered
-  }, [items, teamMembers, view])
+  }, [items, teamMembers, teamFilter, managerFilter])
 
   // Group by manager, then by coverage
   const groupedPeople = useMemo(() => {
     const groups = new Map<string | undefined, Map<CoverageGroup, PersonCoverage[]>>()
+    const isArchitectureView = teamFilter === 'Architecture'
 
     personCoverage.forEach(person => {
       // For stakeholders, group by type (business vs tech) if they have both, otherwise by "No Category"
       let manager: string | undefined
-      if (view === 'architects') {
+      if (isArchitectureView) {
         manager = person.manager || undefined
       } else {
         // Stakeholders: group by whether they're business, tech, or both
@@ -275,7 +330,7 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
       }
 
       if (!groups.has(manager)) {
-        if (view === 'architects') {
+        if (isArchitectureView) {
           groups.set(manager, new Map([
             ['high', []],
             ['medium', []],
@@ -293,7 +348,7 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
       const managerGroup = groups.get(manager)!
       let coverageGroup: CoverageGroup = 'none'
 
-      if (view === 'architects') {
+      if (isArchitectureView) {
         if (person.hasPrimary) {
           if (person.totalCoverage >= 5) coverageGroup = 'high'
           else if (person.totalCoverage >= 2) coverageGroup = 'medium'
@@ -311,24 +366,24 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
       }
     })
 
-    // Sort within each group
+    // Sort within each group alphabetically by name
     groups.forEach(managerGroup => {
       managerGroup.forEach((people) => {
-        people.sort((a, b) => {
-          // Primary roles first, then by total coverage
-          if (view === 'architects') {
-            if (a.hasPrimary !== b.hasPrimary) return a.hasPrimary ? -1 : 1
-            return b.totalCoverage - a.totalCoverage
-          } else {
-            // For stakeholders, sort by name alphabetically
-            return a.name.localeCompare(b.name)
-          }
-        })
+        people.sort((a, b) => a.name.localeCompare(b.name))
       })
     })
 
     return groups
-  }, [personCoverage, view])
+  }, [personCoverage, teamFilter])
+  
+  // Get unique manager names for filter dropdown
+  const managerNames = useMemo(() => {
+    const managers = new Set<string>()
+    teamMembers.forEach((m: TeamMember) => {
+      if (m.manager) managers.add(m.manager)
+    })
+    return Array.from(managers).sort()
+  }, [teamMembers])
 
   // Get items with skills gaps for the "New" box
   const itemsWithSkillsGaps = useMemo(() => {
@@ -342,8 +397,35 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
-      <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-        <h1 className="text-xl font-semibold">{view === 'architects' ? 'Architecture Team Structure' : 'Stakeholder Structure'}</h1>
+      <div className="flex items-center gap-4 p-4 border-b border-slate-200 dark:border-slate-800">
+        <h1 className="text-xl font-semibold">Team Structure</h1>
+        <label className="flex items-center gap-2">
+          <span className="text-sm font-medium">Team:</span>
+          <select
+            value={teamFilter}
+            onChange={e => setTeamFilter(e.target.value as typeof teamFilter)}
+            className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+          >
+            <option value="Architecture">Architecture</option>
+            <option value="Business Stakeholders">Business Stakeholders</option>
+            <option value="Tech Stakeholders">Tech Stakeholders</option>
+            <option value="All Stakeholders">All Stakeholders</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-sm font-medium">Manager:</span>
+          <select
+            value={managerFilter}
+            onChange={e => setManagerFilter(e.target.value)}
+            className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+          >
+            <option value="All">All</option>
+            <option value="Unassigned">Unassigned</option>
+            {managerNames.map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </label>
       </div>
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-2">
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 relative">
@@ -361,7 +443,7 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
               <h3 className="text-base font-semibold mb-2 text-slate-700 dark:text-slate-300">
                 {manager || 'No Manager Assigned'}
               </h3>
-              {(view === 'architects' 
+              {((teamFilter === 'Architecture')
                 ? (['high', 'medium', 'low', 'none'] as CoverageGroup[])
                 : (['all'] as CoverageGroup[])
               ).map(coverageGroup => {
@@ -371,7 +453,7 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
 
                 return (
                   <div key={coverageGroup} className="mb-3">
-                    {view === 'architects' && coverageGroup === 'none' && (
+                    {teamFilter === 'Architecture' && coverageGroup === 'none' && (
                       <h4 className="text-xs font-medium mb-1.5 text-slate-600 dark:text-slate-400 uppercase tracking-wide">
                         No Coverage
                       </h4>
@@ -381,7 +463,7 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
                         <div
                           key={person.name}
                           className={`p-2 rounded border-2 ${getCoverageColor()} ${
-                            view === 'architects' && !person.hasPrimary && person.secondaryCount > 0 ? 'border-dashed' : ''
+                            teamFilter === 'Architecture' && !person.hasPrimary && person.secondaryCount > 0 ? 'border-dashed' : ''
                           } bg-white dark:bg-slate-900`}
                         >
                           <div className="flex items-center gap-1.5 mb-1.5">
@@ -392,26 +474,31 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
                             >
                               {person.name}
                             </div>
-                            {view === 'architects' && person.hasPrimary && (
+                            {teamFilter === 'Architecture' && person.hasPrimary && (
                               <span className="text-[10px] px-1 py-0.5 bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded">
                                 Key
                               </span>
                             )}
-                            {view === 'architects' && !person.hasPrimary && person.secondaryCount > 0 && (
-                              <span className="text-[10px] px-1 py-0.5 bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200 rounded">
+                            {teamFilter === 'Architecture' && !person.hasPrimary && person.secondaryCount > 0 && (
+                              <span className="text-[10px] px-1 py-0.5 bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-blue-200 rounded">
                                 Sec
                               </span>
                             )}
                           </div>
 
-                          {view === 'architects' ? (
+                          {teamFilter === 'Architecture' ? (
                             <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
                               {person.primaryItems.length > 0 && (
                                 <div className="mb-1">
                                   <div className="text-[10px] font-medium mb-0.5">Primary:</div>
-                                  {person.primaryItems.map(({ item, lens }, idx) => (
-                                    <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight">
-                                      • {item.name} ({lens})
+                                  {groupAndSortItems(person.primaryItems).map(({ lens, items }) => (
+                                    <div key={lens} className="mb-0.5">
+                                      <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                      {items.map(({ item }, idx) => (
+                                        <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                          • {item.name}
+                                        </div>
+                                      ))}
                                     </div>
                                   ))}
                                 </div>
@@ -419,9 +506,14 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
                               {person.secondaryItems.length > 0 && (
                                 <div>
                                   <div className="text-[10px] font-medium mb-0.5">Secondary:</div>
-                                  {person.secondaryItems.map(({ item, lens }, idx) => (
-                                    <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight">
-                                      • {item.name} ({lens})
+                                  {groupAndSortItems(person.secondaryItems).map(({ lens, items }) => (
+                                    <div key={lens} className="mb-0.5">
+                                      <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                      {items.map(({ item }, idx) => (
+                                        <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                          • {item.name}
+                                        </div>
+                                      ))}
                                     </div>
                                   ))}
                                 </div>
@@ -434,9 +526,14 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
                               {person.hasDirectReports && person.teamItems.length > 0 && (
                                 <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
                                   <div className="text-[10px] font-medium mb-0.5">Team:</div>
-                                  {person.teamItems.map(({ item, lens }, idx) => (
-                                    <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight">
-                                      • {item.name} ({lens})
+                                  {groupAndSortItems(person.teamItems).map(({ lens, items }) => (
+                                    <div key={lens} className="mb-0.5">
+                                      <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                      {items.map(({ item }, idx) => (
+                                        <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                          • {item.name}
+                                        </div>
+                                      ))}
                                     </div>
                                   ))}
                                 </div>
@@ -447,14 +544,19 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
                               {person.businessContactItems.length > 0 && (
                                 <div className="mb-1">
                                   <div className="text-[10px] font-medium mb-0.5">Business:</div>
-                                  {person.businessContactItems.map(({ item, lens }, idx) => (
-                                    <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight">
-                                      • {item.name} ({lens})
-                                      {item.primaryArchitect && (
-                                        <span className="text-slate-500 dark:text-slate-500 ml-1">
-                                          - {item.primaryArchitect}
-                                        </span>
-                                      )}
+                                  {groupAndSortItems(person.businessContactItems).map(({ lens, items }) => (
+                                    <div key={lens} className="mb-0.5">
+                                      <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                      {items.map(({ item }, idx) => (
+                                        <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                          • {item.name}
+                                          {item.primaryArchitect && (
+                                            <span className="text-slate-500 dark:text-slate-500 ml-1">
+                                              - {item.primaryArchitect}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ))}
                                     </div>
                                   ))}
                                 </div>
@@ -462,14 +564,19 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
                               {person.techContactItems.length > 0 && (
                                 <div className={person.businessContactItems.length > 0 ? "mb-1" : ""}>
                                   <div className="text-[10px] font-medium mb-0.5">Tech:</div>
-                                  {person.techContactItems.map(({ item, lens }, idx) => (
-                                    <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight">
-                                      • {item.name} ({lens})
-                                      {item.primaryArchitect && (
-                                        <span className="text-slate-500 dark:text-slate-500 ml-1">
-                                          - {item.primaryArchitect}
-                                        </span>
-                                      )}
+                                  {groupAndSortItems(person.techContactItems).map(({ lens, items }) => (
+                                    <div key={lens} className="mb-0.5">
+                                      <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                      {items.map(({ item }, idx) => (
+                                        <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                          • {item.name}
+                                          {item.primaryArchitect && (
+                                            <span className="text-slate-500 dark:text-slate-500 ml-1">
+                                              - {item.primaryArchitect}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ))}
                                     </div>
                                   ))}
                                 </div>
@@ -517,7 +624,17 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
                                             <div className="flex-1 min-w-0">
                                               <div className="font-medium">{task.description}</div>
                                               {task.assignedTo && (
-                                                <div className="text-slate-500">Assigned: {task.assignedTo}</div>
+                                                <div className="text-slate-500">
+                                                  Assigned: <button
+                                                    onClick={(e) => {
+                                                      e.stopPropagation()
+                                                      onEditPerson?.(task.assignedTo!)
+                                                    }}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                  >
+                                                    {task.assignedTo}
+                                                  </button>
+                                                </div>
                                               )}
                                               {task.itemReferences && task.itemReferences.length > 0 && (
                                                 <div className="text-slate-500">
@@ -562,7 +679,7 @@ export function TeamModal({ view, onEditPerson, refreshKey, onOpenMeetingNote, o
             </div>
           ))}
           {/* "Skills Needed" box for items with skills gaps - only show in architects view, at the bottom */}
-          {view === 'architects' && itemsWithSkillsGaps.length > 0 && (
+          {teamFilter === 'Architecture' && itemsWithSkillsGaps.length > 0 && (
             <div className="mb-4">
               <h3 className="text-base font-semibold mb-2 text-slate-700 dark:text-slate-300">
                 Skills Needed

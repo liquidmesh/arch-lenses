@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db, getAllLenses } from '../db'
-import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type LensDefinition } from '../types'
+import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type LensDefinition, type Task } from '../types'
 import { ItemDialog } from './ItemDialog'
 import { getLensOrderSync } from '../utils/lensOrder'
 
@@ -21,15 +21,32 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
   const [hoveredItemId, setHoveredItemId] = useState<number | null>(null)
   const [fieldFilter, setFieldFilter] = useState<{ field: string; value: string } | null>(null)
-  const [layoutMode, setLayoutMode] = useState<'columns' | 'rows'>('columns')
-  const [viewMode, setViewMode] = useState<'skillGaps' | 'tags' | 'summary'>('summary')
-  const [zoom, setZoom] = useState(1)
+  
+  // Load settings from localStorage
+  const [layoutMode, setLayoutMode] = useState<'columns' | 'rows'>(() => {
+    const saved = localStorage.getItem('graph-layout-mode')
+    return (saved === 'rows' || saved === 'columns') ? saved : 'columns'
+  })
+  const [viewMode, setViewMode] = useState<'skillGaps' | 'tags' | 'summary' | 'tasks'>(() => {
+    const saved = localStorage.getItem('graph-view-mode')
+    return (saved === 'skillGaps' || saved === 'tags' || saved === 'summary' || saved === 'tasks') ? saved : 'summary'
+  })
+  const [zoom, setZoom] = useState(() => {
+    const saved = localStorage.getItem('graph-zoom')
+    const parsed = saved ? parseFloat(saved) : 1
+    return isNaN(parsed) || parsed <= 0 ? 1 : parsed
+  })
+  const [showParentBoxes, setShowParentBoxes] = useState(() => {
+    const saved = localStorage.getItem('graph-show-parent-boxes')
+    return saved === 'true'
+  })
+  
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editItem, setEditItem] = useState<ItemRecord | null>(null)
   const [showInstructions, setShowInstructions] = useState(true)
   const [filterToRelated, setFilterToRelated] = useState(false)
-  const [showParentBoxes, setShowParentBoxes] = useState(true)
   const [lenses, setLenses] = useState<LensDefinition[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
 
   // Load lenses from database
   useEffect(() => {
@@ -48,6 +65,26 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
       window.removeEventListener('lensesUpdated', handleLensesUpdated)
     }
   }, [])
+
+  // Persist layout mode to localStorage
+  useEffect(() => {
+    localStorage.setItem('graph-layout-mode', layoutMode)
+  }, [layoutMode])
+
+  // Persist view mode to localStorage
+  useEffect(() => {
+    localStorage.setItem('graph-view-mode', viewMode)
+  }, [viewMode])
+
+  // Persist zoom to localStorage
+  useEffect(() => {
+    localStorage.setItem('graph-zoom', zoom.toString())
+  }, [zoom])
+
+  // Persist show parent boxes to localStorage
+  useEffect(() => {
+    localStorage.setItem('graph-show-parent-boxes', showParentBoxes.toString())
+  }, [showParentBoxes])
 
   // Delay showing instructions by 1 second when selection/hover changes
   useEffect(() => {
@@ -68,11 +105,16 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   }, [])
 
   async function loadItems() {
-    const [allItems, allRels] = await Promise.all([db.items.toArray(), db.relationships.toArray()])
+    const [allItems, allRels, allTasks] = await Promise.all([
+      db.items.toArray(), 
+      db.relationships.toArray(),
+      db.tasks.toArray()
+    ])
     // Filter items to only visible lenses
     const filteredItems = allItems.filter(item => visible[item.lens])
     setItems(filteredItems)
     setRels(allRels)
+    setTasks(allTasks)
   }
 
   useEffect(() => {
@@ -80,6 +122,17 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     loadItems()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible])
+  
+  // Reload tasks periodically to catch updates
+  useEffect(() => {
+    async function loadTasks() {
+      const allTasks = await db.tasks.toArray()
+      setTasks(allTasks)
+    }
+    loadTasks()
+    const interval = setInterval(loadTasks, 2000) // Poll every 2 seconds
+    return () => clearInterval(interval)
+  }, [])
   
   // Listen for lens updates to reload items
   useEffect(() => {
@@ -100,15 +153,19 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   }, [selectedItemId])
 
   // Filter relationships to only show those related to selected or hovered item
+  // When filterToRelated is active, only use selectedItemId (ignore hover)
   const visibleRels = useMemo(() => {
-    const activeItemId = hoveredItemId || selectedItemId
+    // When filter is active, only show relationships for selected item, not hovered
+    const activeItemId = filterToRelated ? selectedItemId : (hoveredItemId || selectedItemId)
     if (!activeItemId) return []
     return rels.filter(r => r.fromItemId === activeItemId || r.toItemId === activeItemId)
-  }, [rels, selectedItemId, hoveredItemId])
+  }, [rels, selectedItemId, hoveredItemId, filterToRelated])
 
   // Get set of related item IDs for highlighting
+  // When filterToRelated is active, only use selectedItemId (ignore hover)
   const relatedItemIds = useMemo(() => {
-    const activeItemId = hoveredItemId || selectedItemId
+    // When filter is active, only show relationships for selected item, not hovered
+    const activeItemId = filterToRelated ? selectedItemId : (hoveredItemId || selectedItemId)
     if (!activeItemId) return new Set<number>()
     const relatedIds = new Set<number>()
     relatedIds.add(activeItemId) // Include the active item itself
@@ -120,7 +177,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
       }
     })
     return relatedIds
-  }, [visibleRels, selectedItemId, hoveredItemId])
+  }, [visibleRels, selectedItemId, hoveredItemId, filterToRelated])
 
   // Filter items based on field filter and/or related items filter
   const filteredItems = useMemo(() => {
@@ -236,12 +293,13 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
                 <span className="mr-1">View:</span>
                 <select 
                   value={viewMode} 
-                  onChange={e => setViewMode(e.target.value as 'skillGaps' | 'tags' | 'summary')}
+                  onChange={e => setViewMode(e.target.value as 'skillGaps' | 'tags' | 'summary' | 'tasks')}
                   className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                 >
                   <option value="skillGaps">Architecture coverage</option>
                   <option value="tags">Tags</option>
                   <option value="summary">Summary</option>
+                  <option value="tasks">Tasks</option>
                 </select>
               </label>
               <label className="flex items-center gap-1 text-xs">
@@ -369,12 +427,32 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
           const isRelated = n.id !== undefined && relatedItemIds.has(n.id)
           const isActive = isSelected || isHovered || isRelated
           
+          // Get open tasks for this item
+          const itemOpenTasks = n.id !== undefined 
+            ? tasks.filter(t => !t.completedAt && t.itemReferences && t.itemReferences.filter((id): id is number => id !== undefined).includes(n.id!))
+            : []
+          const openTaskCount = itemOpenTasks.length
+          
           // Determine colors and stroke based on view mode
           let fillColor: string
           let strokeColor: string
           let strokeWidth: number
           
-          if (viewMode === 'tags') {
+          if (viewMode === 'tasks') {
+            // Tasks view: color by open task count
+            // 0 tasks: green, 1 task: orange, 2+ tasks: red
+            if (openTaskCount === 0) {
+              fillColor = isActive ? "#bbf7d0" : "#dcfce7"
+              strokeColor = isActive ? "#16a34a" : "#22c55e"
+            } else if (openTaskCount === 1) {
+              fillColor = isActive ? "#fed7aa" : "#ffedd5"
+              strokeColor = isActive ? "#ea580c" : "#f97316"
+            } else {
+              fillColor = isActive ? "#fecaca" : "#fee2e2"
+              strokeColor = isActive ? "#dc2626" : "#ef4444"
+            }
+            strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
+          } else if (viewMode === 'tags') {
             // Tags view: color by first tag, or default if no tags
             if (n.tags.length > 0) {
               fillColor = isActive ? getTagColor(n.tags[0]) : getTagColor(n.tags[0])
@@ -464,6 +542,46 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
                   {line}
                 </text>
               ))}
+              
+              {/* Tasks view: show task names or count */}
+              {viewMode === 'tasks' && openTaskCount > 0 && (
+                <>
+                  {openTaskCount <= 2 ? (
+                    // Show task names for 1-2 tasks
+                    (() => {
+                      let currentY = n.y - 22 + nameLines.length * 11 + 4
+                      return itemOpenTasks.slice(0, 2).flatMap((task) => {
+                        const taskLines = wrapText(task.description, maxTextWidth, 9)
+                        const result = taskLines.map((line, lineIdx) => (
+                          <text
+                            key={`task-${task.id}-${lineIdx}`}
+                            x={n.x}
+                            y={currentY + lineIdx * 8}
+                            textAnchor="middle"
+                            className="fill-slate-700 dark:fill-slate-300"
+                            style={{ fontSize: 9 }}
+                          >
+                            {line}
+                          </text>
+                        ))
+                        currentY += taskLines.length * 8
+                        return result
+                      })
+                    })()
+                  ) : (
+                    // Show count for 3+ tasks
+                    <text
+                      x={n.x}
+                      y={n.y - 22 + nameLines.length * 11 + 4}
+                      textAnchor="middle"
+                      className="fill-slate-700 dark:fill-slate-300"
+                      style={{ fontSize: 9 }}
+                    >
+                      {openTaskCount} open tasks
+                    </text>
+                  )}
+                </>
+              )}
               
               {viewMode === 'summary' && (
                 <>
@@ -697,6 +815,9 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
       <ItemDialog
         onOpenMeetingNote={(noteId) => {
           window.dispatchEvent(new CustomEvent('openMeetingNote', { detail: { noteId } }))
+        }}
+        onEditPerson={(personName) => {
+          window.dispatchEvent(new CustomEvent('editPerson', { detail: { personName } }))
         }}
         open={editDialogOpen}
         onClose={() => {

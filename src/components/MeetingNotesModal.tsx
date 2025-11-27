@@ -9,9 +9,10 @@ interface MeetingNotesModalProps {
   initialNoteId?: number // Optional note ID to open/edit when modal opens
   onNoteDialogClose?: () => void // Callback when note dialog closes (to clear initialNoteId in parent)
   onNavigate: (view: ViewType) => void
+  onEditPerson?: (personName: string) => void // Callback to navigate to person view
 }
 
-export function MeetingNotesModal({ initialNoteId, onNoteDialogClose, onNavigate }: MeetingNotesModalProps) {
+export function MeetingNotesModal({ initialNoteId, onNoteDialogClose, onNavigate, onEditPerson }: MeetingNotesModalProps) {
   const [notes, setNotes] = useState<MeetingNote[]>([])
   const [selectedNote, setSelectedNote] = useState<MeetingNote | null>(null)
   const [viewingNoteId, setViewingNoteId] = useState<number | null>(null) // Note being viewed in right panel
@@ -20,6 +21,7 @@ export function MeetingNotesModal({ initialNoteId, onNoteDialogClose, onNavigate
   const [refreshKey, setRefreshKey] = useState(0)
   const [itemMap, setItemMap] = useState<Map<number, { name: string; lens: string }>>(new Map())
   const [searchQuery, setSearchQuery] = useState('')
+
 
   useEffect(() => {
     loadNotes()
@@ -95,9 +97,11 @@ export function MeetingNotesModal({ initialNoteId, onNoteDialogClose, onNavigate
     const allTasks = await db.tasks.toArray()
     const tasksMap = new Map<number, Task[]>()
     allTasks.forEach(task => {
-      const existing = tasksMap.get(task.meetingNoteId) || []
-      existing.push(task)
-      tasksMap.set(task.meetingNoteId, existing)
+      if (task.meetingNoteId !== undefined) {
+        const existing = tasksMap.get(task.meetingNoteId) || []
+        existing.push(task)
+        tasksMap.set(task.meetingNoteId, existing)
+      }
     })
     setTasks(tasksMap)
   }
@@ -181,6 +185,7 @@ export function MeetingNotesModal({ initialNoteId, onNoteDialogClose, onNavigate
         }}
         note={selectedNote}
         readonly={!!initialNoteId && hasOpenedInitialNote} // Read-only when opened from a link and not yet edited
+        onEditPerson={onEditPerson}
         onSaved={() => {
           setRefreshKey(k => k + 1)
           // After saving, if opened from a link, navigate back to main
@@ -289,7 +294,22 @@ export function MeetingNotesModal({ initialNoteId, onNoteDialogClose, onNavigate
                 <div>
                   <h2 className="text-xl font-semibold">{viewingNote.title || '(Untitled)'}</h2>
                   <div className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                    {formatDateTime(viewingNote.dateTime)} • Participants: {viewingNote.participants || '(none)'}
+                    {formatDateTime(viewingNote.dateTime)} • Participants: {viewingNote.participants ? (
+                      viewingNote.participants.split(',').map((p, idx) => {
+                        const name = p.trim()
+                        return (
+                          <span key={idx}>
+                            {idx > 0 && ', '}
+                            <button
+                              onClick={() => onEditPerson?.(name)}
+                              className="text-blue-600 dark:text-blue-400 hover:underline"
+                            >
+                              {name}
+                            </button>
+                          </span>
+                        )
+                      })
+                    ) : '(none)'}
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -329,7 +349,12 @@ export function MeetingNotesModal({ initialNoteId, onNoteDialogClose, onNavigate
                           </button>
                           <span>{task.description}</span>
                           {task.assignedTo && (
-                            <span className="text-xs text-slate-500">@ {task.assignedTo}</span>
+                            <button
+                              onClick={() => onEditPerson?.(task.assignedTo!)}
+                              className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                            >
+                              @ {task.assignedTo}
+                            </button>
                           )}
                           {task.itemReferences && task.itemReferences.length > 0 && (
                             <span className="text-xs text-slate-500">
@@ -408,7 +433,7 @@ export function MeetingNotesModal({ initialNoteId, onNoteDialogClose, onNavigate
               {viewingNote.content && (
                 <div className="border border-slate-200 dark:border-slate-800 rounded p-4">
                   <div 
-                    className="text-sm prose prose-sm dark:prose-invert max-w-none"
+                    className="text-sm ProseMirror prose prose-sm dark:prose-invert max-w-none"
                     dangerouslySetInnerHTML={{ __html: viewingNote.content }}
                   />
                 </div>

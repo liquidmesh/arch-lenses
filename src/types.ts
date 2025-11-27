@@ -65,10 +65,13 @@ export interface RelationshipRecord {
   createdAt: number;
 }
 
+export type TeamType = 'Architecture' | 'Business Stakeholder' | 'Tech Stakeholder'
+
 export interface TeamMember {
   id?: number;
   name: string;
   manager?: string;
+  team?: TeamType; // Defaults to 'Architecture' if not set
   createdAt: number;
   updatedAt: number;
 }
@@ -86,7 +89,7 @@ export interface MeetingNote {
 
 export interface Task {
   id?: number;
-  meetingNoteId: number;
+  meetingNoteId?: number; // Optional - tasks can exist without a meeting note
   description: string;
   assignedTo?: string; // person name
   itemReferences: number[]; // array of item ids

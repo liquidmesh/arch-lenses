@@ -90,6 +90,32 @@ class ArchLensesDB extends Dexie {
         await tx.table('lenses').bulkAdd(defaultLenses)
       }
     })
+    // Version 10: Make meetingNoteId optional in tasks (allow standalone tasks)
+    this.version(10).stores({
+      items: '++id, &[lens+name], lens, name, updatedAt',
+      relationships: '++id, fromLens, fromItemId, toLens, toItemId',
+      teamMembers: '++id, name, manager, updatedAt',
+      meetingNotes: '++id, dateTime, createdAt, updatedAt',
+      tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
+      lenses: '++id, key, order, updatedAt',
+    })
+    // Version 11: Add team field to teamMembers
+    this.version(11).stores({
+      items: '++id, &[lens+name], lens, name, updatedAt',
+      relationships: '++id, fromLens, fromItemId, toLens, toItemId',
+      teamMembers: '++id, name, manager, team, updatedAt',
+      meetingNotes: '++id, dateTime, createdAt, updatedAt',
+      tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
+      lenses: '++id, key, order, updatedAt',
+    }).upgrade(async (tx) => {
+      // Set default team to 'Architecture' for existing members
+      const members = await tx.table('teamMembers').toArray()
+      for (const member of members) {
+        if (!member.team) {
+          await tx.table('teamMembers').update(member.id!, { team: 'Architecture' })
+        }
+      }
+    })
   }
 }
 

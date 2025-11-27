@@ -14,6 +14,7 @@ import { db, getAllPeopleNames, getAllItemNames } from '../db'
 import { type MeetingNote, type Task } from '../types'
 import { Modal } from './Modal'
 import { LENSES } from '../types'
+import { AutocompleteInput } from './AutocompleteInput'
 
 // Custom FontSize extension
 const FontSize = Extension.create({
@@ -67,6 +68,7 @@ interface MeetingNoteDialogProps {
   note?: MeetingNote | null
   onSaved?: () => void
   readonly?: boolean // If true, show in read-only mode
+  onEditPerson?: (personName: string) => void // Callback to navigate to person view
 }
 
 interface TaskFormData {
@@ -76,7 +78,7 @@ interface TaskFormData {
   itemIds: number[]
 }
 
-export function MeetingNoteDialog({ open, onClose, note, onSaved, readonly = false }: MeetingNoteDialogProps) {
+export function MeetingNoteDialog({ open, onClose, note, onSaved, readonly = false, onEditPerson }: MeetingNoteDialogProps) {
   const isNew = !note?.id
   const [title, setTitle] = useState(note?.title || '')
   const [participants, setParticipants] = useState(note?.participants || '')
@@ -458,7 +460,22 @@ export function MeetingNoteDialog({ open, onClose, note, onSaved, readonly = fal
             <div>
               <div className="font-medium text-lg">{note.title || '(Untitled)'}</div>
               <div className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                {formatDateTime(note.dateTime)} • Participants: {note.participants || '(none)'}
+                {formatDateTime(note.dateTime)} • Participants: {note.participants ? (
+                  note.participants.split(',').map((p, idx) => {
+                    const name = p.trim()
+                    return (
+                      <span key={idx}>
+                        {idx > 0 && ', '}
+                        <button
+                          onClick={() => onEditPerson?.(name)}
+                          className="text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          {name}
+                        </button>
+                      </span>
+                    )
+                  })
+                ) : '(none)'}
               </div>
             </div>
             <div className="flex gap-2">
@@ -521,7 +538,12 @@ export function MeetingNoteDialog({ open, onClose, note, onSaved, readonly = fal
                     </button>
                     <span>{task.description}</span>
                     {task.assignedTo && (
-                      <span className="text-xs">@ {task.assignedTo}</span>
+                      <button
+                        onClick={() => onEditPerson?.(task.assignedTo!)}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        @ {task.assignedTo}
+                      </button>
                     )}
                     {task.itemReferences && task.itemReferences.length > 0 && (
                       <span className="text-xs text-slate-500">
@@ -571,7 +593,7 @@ export function MeetingNoteDialog({ open, onClose, note, onSaved, readonly = fal
           {note.content && (
             <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
               <div 
-                className="text-sm prose prose-sm dark:prose-invert max-w-none"
+                className="text-sm ProseMirror prose prose-sm dark:prose-invert max-w-none"
                 dangerouslySetInnerHTML={{ __html: note.content }}
               />
             </div>
@@ -732,19 +754,13 @@ export function MeetingNoteDialog({ open, onClose, note, onSaved, readonly = fal
                     className="flex-1 px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 min-w-[200px]"
                     placeholder="Task description"
                   />
-                  <input
-                    type="text"
+                  <AutocompleteInput
                     value={task.assignedTo || ''}
-                    onChange={e => handleUpdateTask(task, { assignedTo: e.target.value })}
-                    list={`people-list-existing-${task.id}`}
+                    onChange={(value) => handleUpdateTask(task, { assignedTo: value })}
+                    suggestions={peopleNames}
                     className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 w-32"
                     placeholder="Assigned to"
                   />
-                  <datalist id={`people-list-existing-${task.id}`}>
-                    {peopleNames.map(name => (
-                      <option key={name} value={name} />
-                    ))}
-                  </datalist>
                   <div className="flex flex-wrap gap-1">
                     {task.itemReferences?.map(itemId => {
                       const item = itemMap.get(itemId)
@@ -853,19 +869,13 @@ export function MeetingNoteDialog({ open, onClose, note, onSaved, readonly = fal
                     className="flex-1 px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 min-w-[200px]"
                     placeholder="Task description"
                   />
-                  <input
-                    type="text"
+                  <AutocompleteInput
                     value={task.assignedTo || ''}
-                    onChange={e => handleUpdateTask(task, { assignedTo: e.target.value })}
-                    list={`people-list-existing-completed-${task.id}`}
+                    onChange={(value) => handleUpdateTask(task, { assignedTo: value })}
+                    suggestions={peopleNames}
                     className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 w-32"
                     placeholder="Assigned to"
                   />
-                  <datalist id={`people-list-existing-completed-${task.id}`}>
-                    {peopleNames.map(name => (
-                      <option key={name} value={name} />
-                    ))}
-                  </datalist>
                   <div className="flex flex-wrap gap-1">
                     {task.itemReferences?.map(itemId => {
                       const item = itemMap.get(itemId)
@@ -922,19 +932,13 @@ export function MeetingNoteDialog({ open, onClose, note, onSaved, readonly = fal
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         <div>
                           <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Assigned to</label>
-                          <input
-                            type="text"
+                          <AutocompleteInput
                             value={task.assignedTo}
-                            onChange={e => updateTask(index, { assignedTo: e.target.value })}
-                            list={`people-list-${index}`}
+                            onChange={(value) => updateTask(index, { assignedTo: value })}
+                            suggestions={peopleNames}
                             className="w-full px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700"
                             placeholder="Person name"
                           />
-                          <datalist id={`people-list-${index}`}>
-                            {peopleNames.map(name => (
-                              <option key={name} value={name} />
-                            ))}
-                          </datalist>
                         </div>
                         
                         <div>

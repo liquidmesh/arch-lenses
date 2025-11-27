@@ -205,6 +205,9 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
         onOpenMeetingNote={(noteId) => {
           window.dispatchEvent(new CustomEvent('openMeetingNote', { detail: { noteId } }))
         }}
+        onEditPerson={(personName) => {
+          window.dispatchEvent(new CustomEvent('editPerson', { detail: { personName } }))
+        }}
       />
     </section>
   )

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db, getAllLenses } from '../db'
-import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type LensDefinition, type Task } from '../types'
+import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type LensDefinition, type Task, type TeamMember } from '../types'
 import { ItemDialog } from './ItemDialog'
 import { getLensOrderSync } from '../utils/lensOrder'
 
@@ -20,6 +20,8 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
   const [hoveredItemId, setHoveredItemId] = useState<number | null>(null)
+  const [selectedManager, setSelectedManager] = useState<string | null>(null)
+  const [hoveredManager, setHoveredManager] = useState<string | null>(null)
   const [fieldFilter, setFieldFilter] = useState<{ field: string; value: string } | null>(null)
   
   // Load settings from localStorage
@@ -45,8 +47,11 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   const [editItem, setEditItem] = useState<ItemRecord | null>(null)
   const [showInstructions, setShowInstructions] = useState(true)
   const [filterToRelated, setFilterToRelated] = useState(false)
+  const [filterToManager, setFilterToManager] = useState(false)
+  const [selectedManagerForFilter, setSelectedManagerForFilter] = useState<string | null>(null)
   const [lenses, setLenses] = useState<LensDefinition[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
 
   // Load lenses from database
   useEffect(() => {
@@ -86,6 +91,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     localStorage.setItem('graph-show-parent-boxes', showParentBoxes.toString())
   }, [showParentBoxes])
 
+
   // Delay showing instructions by 1 second when selection/hover changes
   useEffect(() => {
     setShowInstructions(false)
@@ -105,16 +111,20 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   }, [])
 
   async function loadItems() {
-    const [allItems, allRels, allTasks] = await Promise.all([
+    const [allItems, allRels, allTasks, allTeamMembers] = await Promise.all([
       db.items.toArray(), 
       db.relationships.toArray(),
-      db.tasks.toArray()
+      db.tasks.toArray(),
+      db.teamMembers.toArray()
     ])
     // Filter items to only visible lenses
     const filteredItems = allItems.filter(item => visible[item.lens])
     setItems(filteredItems)
     setRels(allRels)
     setTasks(allTasks)
+    // Filter to only Architecture team members
+    const architectureTeam = allTeamMembers.filter(m => (m.team || 'Architecture') === 'Architecture')
+    setTeamMembers(architectureTeam)
   }
 
   useEffect(() => {
@@ -152,10 +162,225 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     }
   }, [selectedItemId])
 
+  // Clear manager filter when manager is deselected
+  useEffect(() => {
+    if (!selectedManager) {
+      setFilterToManager(false)
+      setSelectedManagerForFilter(null)
+    }
+  }, [selectedManager])
+
+  // Helper function to recursively get all reports for a manager
+  function getAllReports(managerName: string, teamMembers: TeamMember[]): Set<string> {
+    const reports = new Set<string>()
+    const directReports = teamMembers.filter(m => m.manager === managerName)
+    
+    directReports.forEach(report => {
+      reports.add(report.name)
+      // Recursively get reports of this report
+      const subReports = getAllReports(report.name, teamMembers)
+      subReports.forEach(subReport => reports.add(subReport))
+    })
+    
+    return reports
+  }
+
+
+  // Generate manager colors with hierarchical relationships (for all managers)
+  // Each manager gets a unique color, but sub-managers have variations of their parent's color
+  function generateManagerColors(teamMembers: TeamMember[]): Map<string, { fill: string; stroke: string }> {
+    const colors = new Map<string, { fill: string; stroke: string }>()
+
+    // Get all managers in the Architecture team (those who have people reporting to them)
+    const allManagers = new Set<string>()
+    teamMembers.forEach(member => {
+      const isManager = teamMembers.some(m => m.manager === member.name)
+      if (isManager) {
+        allManagers.add(member.name)
+      }
+    })
+
+    // Identify top-level managers (those with no manager in the Architecture team)
+    const topLevelManagers = new Set<string>()
+    allManagers.forEach(managerName => {
+      const manager = teamMembers.find(m => m.name === managerName)
+      if (!manager || !manager.manager || !allManagers.has(manager.manager)) {
+        topLevelManagers.add(managerName)
+      }
+    })
+
+    // Build hierarchy: map each manager to their direct reports
+    const managerHierarchy = new Map<string, string[]>()
+    allManagers.forEach(managerName => {
+      const reports = teamMembers
+        .filter(m => m.manager === managerName && allManagers.has(m.name))
+        .map(m => m.name)
+      managerHierarchy.set(managerName, reports)
+    })
+
+    // Assign unique hues to all managers
+    // Use a wider range of hues for better distinction
+    const baseHues: number[] = []
+    // Generate more hues for better distribution (every 30 degrees gives 12 distinct colors)
+    for (let i = 0; i < 360; i += 30) {
+      baseHues.push(i)
+    }
+    
+    const managerHues = new Map<string, number>()
+    const usedHues = new Set<number>()
+    
+    // First, assign hues to top-level managers
+    const topLevelArray = Array.from(topLevelManagers)
+    topLevelArray.forEach((managerName, idx) => {
+      const hue = baseHues[idx % baseHues.length]
+      managerHues.set(managerName, hue)
+      usedHues.add(hue)
+    })
+
+    // Then assign unique hues to sub-managers, using variations of their parent's hue
+    function assignHueToSubManagers(parentName: string, parentHue: number, depth: number = 0) {
+      const reports = managerHierarchy.get(parentName) || []
+      if (reports.length === 0) return
+      
+      // For each sub-manager, assign a unique hue that's a variation of the parent
+      // Use a shift that ensures uniqueness while maintaining visual relationship
+      const hueShift = 15 // Shift by 15 degrees for each level
+      const maxDepth = 3 // Limit depth to avoid too many shifts
+      const actualDepth = Math.min(depth, maxDepth)
+      
+      reports.forEach((subManagerName, idx) => {
+        if (managerHues.has(subManagerName)) return // Already assigned
+        
+        // Calculate a variation of the parent hue
+        // For first sub-manager: shift by hueShift
+        // For subsequent sub-managers: shift by additional amounts
+        const shift = (actualDepth + 1) * hueShift + (idx * 10) // Additional shift for multiple siblings
+        let subHue = (parentHue + shift) % 360
+        
+        // Ensure uniqueness: if this hue is already used, find the next available one
+        let attempts = 0
+        while (usedHues.has(subHue) && attempts < 36) {
+          subHue = (subHue + 10) % 360 // Try next 10-degree increment
+          attempts++
+        }
+        
+        // If still not unique, find any unused hue
+        if (usedHues.has(subHue)) {
+          for (let i = 0; i < 360; i += 5) {
+            const candidateHue = (parentHue + i) % 360
+            if (!usedHues.has(candidateHue)) {
+              subHue = candidateHue
+              break
+            }
+          }
+        }
+        
+        managerHues.set(subManagerName, subHue)
+        usedHues.add(subHue)
+        
+        // Recursively assign to their sub-managers
+        assignHueToSubManagers(subManagerName, subHue, actualDepth + 1)
+      })
+    }
+
+    // Assign hues to all sub-managers starting from top-level managers
+    topLevelArray.forEach(managerName => {
+      const parentHue = managerHues.get(managerName)!
+      assignHueToSubManagers(managerName, parentHue, 0)
+    })
+
+    // Generate colors for all managers
+    allManagers.forEach(managerName => {
+      const hue = managerHues.get(managerName) || 0
+      
+      // Top-level: full saturation, medium lightness
+      // Sub-managers: same hue family, adjusted saturation/lightness to show hierarchy
+      const manager = teamMembers.find(m => m.name === managerName)
+      const isSubManager = manager && manager.manager && allManagers.has(manager.manager)
+      
+      let saturation = 70
+      let fillLightness = 85
+      let strokeLightness = 50
+      
+      if (isSubManager) {
+        // Sub-manager: lighter shade, slightly less saturation to show it's a variation
+        fillLightness = 90
+        strokeLightness = 55
+        saturation = 60
+      } else {
+        // Top-level: more vibrant
+        fillLightness = 80
+        strokeLightness = 45
+        saturation = 75
+      }
+
+      colors.set(managerName, {
+        fill: `hsl(${hue}, ${saturation}%, ${fillLightness}%)`,
+        stroke: `hsl(${hue}, ${saturation}%, ${strokeLightness}%)`
+      })
+    })
+
+    return colors
+  }
+
+  // Calculate item coverage by manager (find which manager covers this item)
+  function getItemManagerCoverage(
+    item: ItemRecord, 
+    teamMembers: TeamMember[]
+  ): { manager: string | null; strength: 'primary' | 'secondary' | 'none' } {
+    // Find which manager covers this item
+    const allManagers = new Set<string>()
+    teamMembers.forEach(member => {
+      const isManager = teamMembers.some(m => m.manager === member.name)
+      if (isManager) {
+        allManagers.add(member.name)
+      }
+    })
+    
+    // Check each manager to see if they cover this item
+    for (const managerName of allManagers) {
+      const allReports = getAllReports(managerName, teamMembers)
+      const reportNames = Array.from(allReports)
+      
+      // Check for primary coverage
+      if (item.primaryArchitect && reportNames.includes(item.primaryArchitect.trim())) {
+        return { manager: managerName, strength: 'primary' }
+      }
+      
+      // Check for secondary coverage
+      const hasSecondary = item.secondaryArchitects.some(arch => 
+        reportNames.includes(arch.trim())
+      )
+      if (hasSecondary) {
+        return { manager: managerName, strength: 'secondary' }
+      }
+    }
+    
+    return { manager: null, strength: 'none' }
+  }
+
   // Create a set of visible item IDs (items in visible lenses)
   const visibleItemIds = useMemo(() => {
     return new Set(items.map(item => item.id).filter((id): id is number => !!id))
   }, [items])
+
+  // Generate manager colors for all managers
+  const managerColors = useMemo(() => {
+    return generateManagerColors(teamMembers)
+  }, [teamMembers])
+
+  // Get list of managers for dropdown (only Architecture team members who are managers)
+  const managerList = useMemo(() => {
+    const managers = new Set<string>()
+    teamMembers.forEach(member => {
+      // Check if this person is a manager (has people reporting to them)
+      const isManager = teamMembers.some(m => m.manager === member.name)
+      if (isManager) {
+        managers.add(member.name)
+      }
+    })
+    return Array.from(managers).sort()
+  }, [teamMembers])
 
   // Filter relationships to only show those related to selected or hovered item
   // When filterToRelated is active, only use selectedItemId (ignore hover)
@@ -193,7 +418,28 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     return relatedIds
   }, [visibleRels, selectedItemId, hoveredItemId, filterToRelated])
 
-  // Filter items based on field filter and/or related items filter
+  // Get items covered by a manager's team
+  const getManagerCoveredItems = useMemo(() => {
+    if (!filterToManager || !selectedManagerForFilter) return new Set<number>()
+    
+    const allReports = getAllReports(selectedManagerForFilter, teamMembers)
+    const reportNames = Array.from(allReports)
+    const coveredItemIds = new Set<number>()
+    
+    items.forEach(item => {
+      const isPrimary = item.primaryArchitect && reportNames.includes(item.primaryArchitect.trim())
+      const isSecondary = item.secondaryArchitects.some(arch => reportNames.includes(arch.trim()))
+      if (isPrimary || isSecondary) {
+        if (item.id !== undefined) {
+          coveredItemIds.add(item.id)
+        }
+      }
+    })
+    
+    return coveredItemIds
+  }, [filterToManager, selectedManagerForFilter, teamMembers, items])
+
+  // Filter items based on field filter, related items filter, or manager filter
   const filteredItems = useMemo(() => {
     let result = items
 
@@ -223,8 +469,13 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
       result = result.filter(item => relatedItemIds.has(item.id!))
     }
 
+    // Apply manager filter if active
+    if (filterToManager && selectedManagerForFilter) {
+      result = result.filter(item => getManagerCoveredItems.has(item.id!))
+    }
+
     return result
-  }, [items, fieldFilter, filterToRelated, selectedItemId, relatedItemIds])
+  }, [items, fieldFilter, filterToRelated, selectedItemId, relatedItemIds, filterToManager, selectedManagerForFilter, getManagerCoveredItems])
 
   // Only include visible lenses in layout, using custom order
   // When filtering to related items, only show lenses that have items in the filtered set
@@ -241,9 +492,89 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
       const filteredLensKeys = new Set(filteredItems.map(item => item.lens))
       return ordered.filter(l => filteredLensKeys.has(l.key))
     }
+    if (filterToManager && selectedManagerForFilter) {
+      // Only include lenses that have at least one item covered by the manager
+      const filteredLensKeys = new Set(filteredItems.map(item => item.lens))
+      return ordered.filter(l => filteredLensKeys.has(l.key))
+    }
     return ordered
-  }, [lenses, visible, lensOrderKey, filterToRelated, selectedItemId, filteredItems])
-  const layout = useMemo(() => computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode, showParentBoxes, zoom), [filteredItems, dims, visibleLenses, layoutMode, showParentBoxes, zoom])
+  }, [lenses, visible, lensOrderKey, filterToRelated, selectedItemId, filteredItems, filterToManager, selectedManagerForFilter])
+  
+  // Get manager positions (only in Architecture Coverage view)
+  const managerPositions = useMemo(() => {
+    if (viewMode !== 'skillGaps') return new Map<string, { x: number; y: number }>()
+    
+    const positions = new Map<string, { x: number; y: number }>()
+    const managers = managerList
+    if (managers.length === 0) return positions
+    
+    const managerRowHeight = 70
+    const managerGap = 5
+    const managerWidth = 160
+    const padding = 16
+    const availableW = Math.max(320, (dims.w / zoom) - padding * 2)
+    
+    // Calculate how many managers fit per row
+    const managersPerRow = Math.floor((availableW - padding * 2) / (managerWidth + managerGap))
+    const actualManagersPerRow = Math.max(1, managersPerRow)
+    
+    // Position manager boxes with minimal spacing (2px gap above and below)
+    // Menu/header is positioned absolutely at top-0, SVG has paddingTop: 48px
+    // Menu is approximately 30-35px tall, but SVG starts at 48px, so menu bottom is at ~35px from viewport top
+    // In SVG coordinates (starting at 48px), menu bottom is at 35-48 = -13px, so we position at 0 + 2px gap
+    // First box top = 2px from SVG top (which is 50px from viewport top, just below menu)
+    const topGap = 2
+    const rowGap = 2 // Minimal gap between rows
+    const firstBoxTop = topGap // Top edge of first box in SVG coordinates (2px from SVG start)
+    
+    managers.forEach((manager, idx) => {
+      const row = Math.floor(idx / actualManagersPerRow)
+      const col = idx % actualManagersPerRow
+      const x = padding + col * (managerWidth + managerGap) + managerWidth / 2
+      // Box center = first box top + row offset + half box height
+      const y = firstBoxTop + row * (managerRowHeight + rowGap) + managerRowHeight / 2
+      positions.set(manager, { x, y })
+    })
+    
+    return positions
+  }, [viewMode, managerList, dims.w, zoom])
+
+  const layout = useMemo(() => {
+    const layoutResult = computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode, showParentBoxes, zoom)
+    // Adjust layout to account for manager row if in Architecture Coverage view
+    if (viewMode === 'skillGaps' && managerPositions.size > 0) {
+      const managerRowCount = Math.ceil(managerList.length / Math.max(1, Math.floor((Math.max(320, (dims.w / zoom) - 32)) / 165)))
+      const managerRowHeight = 70
+      const topGap = 2
+      const rowGap = 2
+      const bottomGap = 2
+      const firstBoxTop = topGap
+      // Calculate total height: first box top + all rows + bottom gap
+      const additionalHeight = firstBoxTop + managerRowCount * managerRowHeight + (managerRowCount - 1) * rowGap + bottomGap
+      return {
+        ...layoutResult,
+        height: layoutResult.height + additionalHeight,
+        // Adjust all item positions down by the manager row height
+        positions: new Map(Array.from(layoutResult.positions.entries()).map(([id, pos]) => [
+          id,
+          { x: pos.x, y: pos.y + additionalHeight }
+        ])),
+        nodes: layoutResult.nodes.map(node => ({
+          ...node,
+          y: node.y + additionalHeight
+        })),
+        headers: layoutResult.headers.map(header => ({
+          ...header,
+          y: header.y + additionalHeight
+        })),
+        parentGroups: layoutResult.parentGroups.map(group => ({
+          ...group,
+          y: group.y + additionalHeight
+        }))
+      }
+    }
+    return layoutResult
+  }, [filteredItems, dims, visibleLenses, layoutMode, showParentBoxes, zoom, viewMode, managerPositions, managerList])
 
   function posFor(id?: number) {
     if (!id) return { x: 0, y: 0 }
@@ -333,7 +664,11 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             </div>
             {showInstructions && (
               <div className="flex items-center gap-2">
-                {selectedItemId ? (
+                {filterToManager && selectedManagerForFilter ? (
+                  <span>
+                    Filtered to items covered by {selectedManagerForFilter}. Click filter button again to show all.
+                  </span>
+                ) : selectedItemId ? (
                   <span>
                     Showing relationships for {items.find(i => i.id === selectedItemId)?.name || 'selected item'}. Click again to deselect.
                     {filterToRelated && ' Filtered to related items only.'}
@@ -395,6 +730,121 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             <path key={i} d={`M ${a.x} ${a.y} C ${midX} ${a.y}, ${midX} ${b.y}, ${b.x} ${b.y}`} fill="none" stroke="#3b82f6" strokeWidth={2} />
           )
         })}
+        
+        {/* Manager boxes (only in Architecture Coverage view) */}
+        {viewMode === 'skillGaps' && Array.from(managerPositions.entries()).map(([managerName, pos]) => {
+          const managerColor = managerColors.get(managerName)
+          const fillColor = managerColor?.fill || "#e5e7eb"
+          const strokeColor = managerColor?.stroke || "#9ca3af"
+          const nodeWidth = layout.nodeWidth
+          const nodeHeight = layout.nodeHeight
+          const isSelected = selectedManager === managerName
+          const isHovered = hoveredManager === managerName
+          const isActive = isSelected || isHovered
+          const isFiltered = filterToManager && selectedManagerForFilter === managerName
+          
+          return (
+            <g 
+              key={`manager-${managerName}`}
+              onClick={() => setSelectedManager(isSelected ? null : managerName)}
+              onMouseEnter={() => setHoveredManager(managerName)}
+              onMouseLeave={() => setHoveredManager(null)}
+              style={{ cursor: 'pointer' }}
+            >
+              <rect
+                x={pos.x - nodeWidth / 2}
+                y={pos.y - nodeHeight / 2}
+                width={nodeWidth}
+                height={nodeHeight}
+                fill={fillColor}
+                stroke={strokeColor}
+                strokeWidth={isActive ? 3 : 2}
+                rx={6}
+                ry={6}
+              />
+              <text
+                x={pos.x}
+                y={pos.y}
+                textAnchor="middle"
+                className="fill-slate-800 dark:fill-slate-200"
+                style={{ fontSize: 12, fontWeight: 600 }}
+              >
+                {managerName}
+              </text>
+              {/* Filter button */}
+              {(isSelected || isHovered) && (
+                <foreignObject
+                  x={pos.x + nodeWidth / 2 - 22}
+                  y={pos.y - nodeHeight / 2 + 2}
+                  width={18}
+                  height={18}
+                >
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      const newFilterState = !filterToManager || selectedManagerForFilter !== managerName
+                      if (newFilterState) {
+                        setSelectedManagerForFilter(managerName)
+                        setFilterToManager(true)
+                        setSelectedManager(managerName) // Also select the manager
+                      } else {
+                        setFilterToManager(false)
+                        setSelectedManagerForFilter(null)
+                        setSelectedManager(null) // Also deselect the manager
+                      }
+                    }}
+                    className="w-full h-full flex items-center justify-center rounded border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700"
+                    title={isFiltered ? "Show all items" : "Show only items covered by this manager"}
+                    style={{ padding: 0, cursor: 'pointer' }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={isFiltered ? "text-blue-600 dark:text-blue-400" : "text-slate-600 dark:text-slate-400"}>
+                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                    </svg>
+                  </button>
+                </foreignObject>
+              )}
+            </g>
+          )
+        })}
+        
+        {/* Relationship lines from managers to items (only in Architecture Coverage view, only when manager is hovered or selected) */}
+        {viewMode === 'skillGaps' && Array.from(managerPositions.entries())
+          .filter(([managerName]) => {
+            const isSelected = selectedManager === managerName
+            const isHovered = hoveredManager === managerName
+            return isSelected || isHovered
+          })
+          .map(([managerName, managerPos]) => {
+            const allReports = getAllReports(managerName, teamMembers)
+            const reportNames = Array.from(allReports)
+            const managerColor = managerColors.get(managerName)
+            const lineColor = managerColor?.stroke || "#9ca3af"
+            const nodeHeight = layout.nodeHeight
+            
+            return layout.nodes.map(item => {
+              // Check if this item is covered by this manager's team
+              const isPrimary = item.primaryArchitect && reportNames.includes(item.primaryArchitect.trim())
+              const isSecondary = item.secondaryArchitects.some(arch => reportNames.includes(arch.trim()))
+              
+              if (!isPrimary && !isSecondary) return null
+              
+              const strokeWidth = isPrimary ? 2 : 1
+              const startY = managerPos.y + nodeHeight / 2
+              const endY = item.y - nodeHeight / 2
+              const midX = (managerPos.x + item.x) / 2
+              
+              return (
+                <path
+                  key={`manager-line-${managerName}-${item.id}`}
+                  d={`M ${managerPos.x} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${item.x} ${endY}`}
+                  fill="none"
+                  stroke={lineColor}
+                  strokeWidth={strokeWidth}
+                />
+              )
+            }).filter(Boolean)
+          })}
+        
         {/* Nodes */}
         {layout.nodes.map(n => {
           const handleFieldClick = (e: React.MouseEvent, field: string, value: string) => {
@@ -488,20 +938,50 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             const hasPrimaryArchitect = !!n.primaryArchitect?.trim()
             const hasSecondaryArchitects = n.secondaryArchitects.length > 0
             
-            // Red: has skills gap OR (no primaryArchitect AND no secondaryArchitects)
-            // Orange: no skills gap AND has secondaryArchitects BUT no primaryArchitect
-            // Blue: normal (has primaryArchitect)
-            if (hasSkillsGap || (!hasPrimaryArchitect && !hasSecondaryArchitects)) {
-              fillColor = isActive ? "#fecaca" : "#fee2e2"
-              strokeColor = isActive ? "#dc2626" : "#ef4444"
+            // Determine if item is red (skills gap or no coverage)
+            const isRed = hasSkillsGap || (!hasPrimaryArchitect && !hasSecondaryArchitects)
+            
+            // Get manager coverage for this item
+            const managerCoverage = getItemManagerCoverage(n, teamMembers)
+            const managerColor = managerCoverage.manager ? managerColors.get(managerCoverage.manager) : null
+            
+            // Base colors (used when item is red and has manager coverage)
+            let baseFillColor: string
+            
+            if (isRed) {
+              baseFillColor = isActive ? "#fecaca" : "#fee2e2"
             } else if (!hasSkillsGap && hasSecondaryArchitects && !hasPrimaryArchitect) {
-              fillColor = isActive ? "#fed7aa" : "#ffedd5"
-              strokeColor = isActive ? "#ea580c" : "#f97316"
+              baseFillColor = isActive ? "#fed7aa" : "#ffedd5"
             } else {
-              fillColor = isActive ? "#bfdbfe" : "#e0f2fe"
-              strokeColor = isActive ? "#2563eb" : "#3b82f6"
+              baseFillColor = isActive ? "#bfdbfe" : "#e0f2fe"
             }
-            strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
+            
+            // Apply manager colors if available
+            if (managerColor && managerCoverage.strength !== 'none') {
+              if (isRed) {
+                // Keep red fill, apply manager color to border
+                fillColor = baseFillColor
+                strokeColor = managerColor.stroke
+              } else {
+                // Apply manager colors to both fill and stroke
+                fillColor = managerColor.fill
+                strokeColor = managerColor.stroke
+              }
+              
+              // Set border thickness based on coverage strength
+              if (managerCoverage.strength === 'primary') {
+                strokeWidth = isHovered || isSelected ? 4 : (isRelated ? 3 : 3)
+              } else if (managerCoverage.strength === 'secondary') {
+                strokeWidth = isHovered || isSelected ? 3 : (isRelated ? 2 : 2)
+              } else {
+                strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
+              }
+            } else {
+              // No manager coverage, make grey
+              fillColor = isActive ? "#e5e7eb" : "#f3f4f6"
+              strokeColor = isActive ? "#9ca3af" : "#d1d5db"
+              strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
+            }
           }
           
           return (

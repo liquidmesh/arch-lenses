@@ -417,7 +417,7 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
             </div>
             
             {/* Show referenced meeting notes and tasks when editing a person */}
-            {(editingId || (initialPersonName && !editingId)) && (referencedNotes.length > 0 || assignedTasks.length > 0) && (
+            {(editingId || (initialPersonName && !editingId)) && (
               <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
                 <div className="grid grid-cols-3 gap-4">
                   {/* Meeting Notes Section */}
@@ -455,17 +455,15 @@ export function TeamManager({ initialPersonName, onSaved, onOpenMeetingNote, onN
                   <div className="col-span-2">
                     <div className="flex justify-between items-center mb-3">
                       <h4 className="font-medium text-sm">Tasks Assigned</h4>
-                      {(editingId || (initialPersonName && !editingId)) && (
-                        <button
-                          onClick={() => {
-                            setEditingTask(null)
-                            setTaskDialogOpen(true)
-                          }}
-                          className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700"
-                        >
-                          + Add Task
-                        </button>
-                      )}
+                      <button
+                        onClick={() => {
+                          setEditingTask(null)
+                          setTaskDialogOpen(true)
+                        }}
+                        className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        + Add Task
+                      </button>
                     </div>
                     {assignedTasks.length > 0 ? (
                       <div className="space-y-2 max-h-60 overflow-y-auto">

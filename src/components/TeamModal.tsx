@@ -30,6 +30,21 @@ interface PersonCoverage {
 
 type CoverageGroup = 'high' | 'medium' | 'low' | 'none' | 'all'
 
+// Helper function to recursively find all reports at any level below a manager
+function getAllReports(managerName: string, teamMembers: TeamMember[]): Set<string> {
+  const reports = new Set<string>()
+  const directReports = teamMembers.filter(m => m.manager === managerName)
+  
+  directReports.forEach(report => {
+    reports.add(report.name)
+    // Recursively get reports of this report
+    const subReports = getAllReports(report.name, teamMembers)
+    subReports.forEach(subReport => reports.add(subReport))
+  })
+  
+  return reports
+}
+
 // Helper function to group and sort items by lens
 function groupAndSortItems(items: Array<{ item: ItemRecord; lens: string }>): Array<{ lens: string; items: Array<{ item: ItemRecord; lens: string }> }> {
   // Group by lens
@@ -53,7 +68,7 @@ function groupAndSortItems(items: Array<{ item: ItemRecord; lens: string }>): Ar
 }
 
 export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavigate: _onNavigate, visible }: TeamModalProps) {
-  const [teamFilter, setTeamFilter] = useState<'Architecture' | 'Business Stakeholders' | 'Tech Stakeholders' | 'All Stakeholders'>('Architecture')
+  const [teamFilter, setTeamFilter] = useState<'All' | 'Architecture' | 'Business Stakeholders' | 'Tech Stakeholders' | 'All Stakeholders'>('Architecture')
   const [managerFilter, setManagerFilter] = useState<string>('All')
   const [items, setItems] = useState<ItemRecord[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
@@ -92,9 +107,10 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
     const visibleLenses = visible || {}
 
     // Initialize with team members based on team filter
-    const shouldIncludeArchitecture = teamFilter === 'Architecture'
-    const shouldIncludeBusiness = teamFilter === 'Business Stakeholders' || teamFilter === 'All Stakeholders'
-    const shouldIncludeTech = teamFilter === 'Tech Stakeholders' || teamFilter === 'All Stakeholders'
+    const shouldIncludeAll = teamFilter === 'All'
+    const shouldIncludeArchitecture = teamFilter === 'Architecture' || shouldIncludeAll
+    const shouldIncludeBusiness = teamFilter === 'Business Stakeholders' || teamFilter === 'All Stakeholders' || shouldIncludeAll
+    const shouldIncludeTech = teamFilter === 'Tech Stakeholders' || teamFilter === 'All Stakeholders' || shouldIncludeAll
     
     teamMembers.forEach(member => {
       const memberTeam = member.team || 'Architecture'
@@ -247,7 +263,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
     })
 
     // Calculate total coverage and team items
-    const isArchitectureView = teamFilter === 'Architecture'
+    const isArchitectureView = teamFilter === 'Architecture' || teamFilter === 'All'
     
     coverage.forEach(person => {
       if (isArchitectureView) {
@@ -258,11 +274,12 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
         person.hasDirectReports = directReports.length > 0
         
         // Collect team items (items where direct reports are primary or secondary)
+        // Only include items from visible lenses (consistent with person's own items)
         if (person.hasDirectReports) {
           const directReportNames = new Set(directReports.map(m => m.name))
           const teamItemSet = new Set<number>() // Use Set to avoid duplicates
           
-          items.forEach(item => {
+          visibleItems.forEach(item => {
             const lensLabel = LENSES.find(l => l.key === item.lens)?.label || item.lens
             // Check if any direct report is primary or secondary architect
             const isTeamItem = 
@@ -281,25 +298,31 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
     })
 
     // Filter based on team filter
-    const shouldShowArchitecture = teamFilter === 'Architecture'
-    const shouldShowBusiness = teamFilter === 'Business Stakeholders' || teamFilter === 'All Stakeholders'
-    const shouldShowTech = teamFilter === 'Tech Stakeholders' || teamFilter === 'All Stakeholders'
+    const shouldShowAll = teamFilter === 'All'
+    const shouldShowArchitecture = teamFilter === 'Architecture' || shouldShowAll
+    const shouldShowBusiness = teamFilter === 'Business Stakeholders' || teamFilter === 'All Stakeholders' || shouldShowAll
+    const shouldShowTech = teamFilter === 'Tech Stakeholders' || teamFilter === 'All Stakeholders' || shouldShowAll
     
     let filtered = Array.from(coverage.values()).filter(person => {
       const member = teamMembers.find(m => m.name === person.name)
       const memberTeam = member?.team || 'Architecture'
       
-      if (shouldShowArchitecture) {
-        // Show architecture team members
+      // If "All" is selected, show everyone
+      if (shouldShowAll) {
+        return true
+      }
+      
+      if (shouldShowArchitecture && !shouldShowBusiness && !shouldShowTech) {
+        // Show architecture team members only
         return memberTeam === 'Architecture' && (person.primaryCount > 0 || person.secondaryCount > 0 || member)
-      } else if (shouldShowBusiness && shouldShowTech) {
+      } else if (shouldShowBusiness && shouldShowTech && !shouldShowArchitecture) {
         // Show all stakeholders
         return (memberTeam === 'Business Stakeholder' || memberTeam === 'Tech Stakeholder') &&
                (person.businessContactCount > 0 || person.techContactCount > 0)
-      } else if (shouldShowBusiness) {
+      } else if (shouldShowBusiness && !shouldShowTech && !shouldShowArchitecture) {
         // Show only business stakeholders
         return memberTeam === 'Business Stakeholder' && person.businessContactCount > 0
-      } else if (shouldShowTech) {
+      } else if (shouldShowTech && !shouldShowBusiness && !shouldShowArchitecture) {
         // Show only tech stakeholders
         return memberTeam === 'Tech Stakeholder' && person.techContactCount > 0
       }
@@ -311,7 +334,12 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
       if (managerFilter === 'Unassigned') {
         filtered = filtered.filter(person => !person.manager)
       } else {
-        filtered = filtered.filter(person => person.manager === managerFilter)
+        // Get all reports at any level below the selected manager (recursive)
+        const allReports = getAllReports(managerFilter, teamMembers)
+        // Include the selected manager and all their reports
+        filtered = filtered.filter(person => 
+          person.name === managerFilter || allReports.has(person.name)
+        )
       }
     }
 
@@ -319,14 +347,17 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
       }, [items, teamMembers, teamFilter, managerFilter, visible])
 
   // Group by manager, then by coverage
+  // When manager filter is active, show hierarchical structure
   const groupedPeople = useMemo(() => {
     const groups = new Map<string | undefined, Map<CoverageGroup, PersonCoverage[]>>()
-    const isArchitectureView = teamFilter === 'Architecture'
+    const isArchitectureView = teamFilter === 'Architecture' || teamFilter === 'All'
 
     personCoverage.forEach(person => {
       // For stakeholders, group by type (business vs tech) if they have both, otherwise by "No Category"
       let manager: string | undefined
       if (isArchitectureView) {
+        // When manager filter is active, group by immediate manager for hierarchical display
+        // Otherwise, group by their manager as usual
         manager = person.manager || undefined
       } else {
         // Stakeholders: group by whether they're business, tech, or both
@@ -388,16 +419,88 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
     })
 
     return groups
-  }, [personCoverage, teamFilter])
+  }, [personCoverage, teamFilter, managerFilter])
   
-  // Get unique manager names for filter dropdown
+  // Build hierarchical structure when manager filter is active
+  const hierarchicalStructure = useMemo(() => {
+    if (managerFilter === 'All' || managerFilter === 'Unassigned' || teamFilter !== 'Architecture') {
+      return null // Don't use hierarchy when filter is not active or not in Architecture view
+    }
+    
+    // Build a map of person name to PersonCoverage
+    const personMap = new Map<string, PersonCoverage>()
+    personCoverage.forEach(person => {
+      personMap.set(person.name, person)
+    })
+    
+    // Build hierarchy: manager -> direct reports -> their reports, etc.
+    interface HierarchyNode {
+      person: PersonCoverage
+      level: number
+      children: HierarchyNode[]
+    }
+    
+    function buildHierarchy(managerName: string, level: number): HierarchyNode[] {
+      const nodes: HierarchyNode[] = []
+      const directReports = personCoverage.filter(p => p.manager === managerName)
+      
+      directReports.forEach(report => {
+        const children = buildHierarchy(report.name, level + 1)
+        nodes.push({
+          person: report,
+          level,
+          children
+        })
+      })
+      
+      return nodes.sort((a, b) => a.person.name.localeCompare(b.person.name))
+    }
+    
+    // Start with the selected manager
+    const selectedManager = personMap.get(managerFilter)
+    if (!selectedManager) return null
+    
+    const root: HierarchyNode = {
+      person: selectedManager,
+      level: 0,
+      children: buildHierarchy(managerFilter, 1)
+    }
+    
+    return root
+  }, [personCoverage, managerFilter, teamFilter])
+  
+  // Get unique manager names for filter dropdown - filtered by team
   const managerNames = useMemo(() => {
     const managers = new Set<string>()
-    teamMembers.forEach((m: TeamMember) => {
-      if (m.manager) managers.add(m.manager)
+    
+    // Use the same team filtering logic as personCoverage
+    const shouldIncludeAll = teamFilter === 'All'
+    const shouldIncludeArchitecture = teamFilter === 'Architecture' || shouldIncludeAll
+    const shouldIncludeBusiness = teamFilter === 'Business Stakeholders' || teamFilter === 'All Stakeholders' || shouldIncludeAll
+    const shouldIncludeTech = teamFilter === 'Tech Stakeholders' || teamFilter === 'All Stakeholders' || shouldIncludeAll
+    
+    // Get all team members in the selected team
+    const teamMembersInFilter = teamMembers.filter((m: TeamMember) => {
+      const memberTeam = m.team || 'Architecture'
+      return (
+        (shouldIncludeArchitecture && memberTeam === 'Architecture') ||
+        (shouldIncludeBusiness && memberTeam === 'Business Stakeholder') ||
+        (shouldIncludeTech && memberTeam === 'Tech Stakeholder')
+      )
     })
+    
+    // Only include managers who are themselves in the selected team
+    // Check if each person in the selected team is a manager (someone reports to them)
+    teamMembersInFilter.forEach((m: TeamMember) => {
+      // Check if this person is a manager (someone in the selected team reports to them)
+      const isManager = teamMembersInFilter.some(other => other.manager === m.name)
+      if (isManager) {
+        managers.add(m.name)
+      }
+    })
+    
     return Array.from(managers).sort()
-  }, [teamMembers])
+  }, [teamMembers, teamFilter])
 
   // Get items with skills gaps for the "New" box
   const itemsWithSkillsGaps = useMemo(() => {
@@ -424,6 +527,236 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
     return 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
   }
 
+  // Helper function to render a person box
+  function renderPersonBox(person: PersonCoverage, indentLevel: number = 0) {
+    const indentStyle = indentLevel > 0 ? { marginLeft: `${indentLevel * 24}px` } : {}
+    
+    return (
+      <div
+        key={person.name}
+        className={`p-2 rounded border-2 ${getCoverageColor()} ${
+          teamFilter === 'Architecture' && !person.hasPrimary && person.secondaryCount > 0 ? 'border-dashed' : ''
+        } bg-white dark:bg-slate-900 min-w-0`}
+        style={indentStyle}
+      >
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <div 
+            className="font-semibold text-sm text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+            onClick={() => onEditPerson?.(person.name)}
+            title="Click to edit person"
+          >
+            {person.name}
+          </div>
+          {teamFilter === 'Architecture' && person.hasPrimary && (
+            <span className="text-[10px] px-1 py-0.5 bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded">
+              Key
+            </span>
+          )}
+          {teamFilter === 'Architecture' && !person.hasPrimary && person.secondaryCount > 0 && (
+            <span className="text-[10px] px-1 py-0.5 bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-blue-200 rounded">
+              Sec
+            </span>
+          )}
+        </div>
+
+        {teamFilter === 'Architecture' ? (
+          <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+            {person.primaryItems.length > 0 && (
+              <div className="mb-1">
+                <div className="text-[10px] font-medium mb-0.5">Primary:</div>
+                {groupAndSortItems(person.primaryItems).map(({ lens, items }) => (
+                  <div key={lens} className="mb-0.5">
+                    <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                    {items.map(({ item }, idx) => (
+                      <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                        • {item.name}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+            {person.secondaryItems.length > 0 && (
+              <div>
+                <div className="text-[10px] font-medium mb-0.5">Secondary:</div>
+                {groupAndSortItems(person.secondaryItems).map(({ lens, items }) => (
+                  <div key={lens} className="mb-0.5">
+                    <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                    {items.map(({ item }, idx) => (
+                      <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                        • {item.name}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+            {person.primaryItems.length === 0 && person.secondaryItems.length === 0 && (
+              <div className="text-[10px] text-slate-500 dark:text-slate-400 italic">
+                No items assigned
+              </div>
+            )}
+            {person.hasDirectReports && person.teamItems.length > 0 && (
+              <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+                <div className="text-[10px] font-medium mb-0.5">Team:</div>
+                {groupAndSortItems(person.teamItems).map(({ lens, items }) => (
+                  <div key={lens} className="mb-0.5">
+                    <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                    {items.map(({ item }, idx) => (
+                      <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                        • {item.name}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+            {person.businessContactItems.length > 0 && (
+              <div className="mb-1">
+                <div className="text-[10px] font-medium mb-0.5">Business:</div>
+                {groupAndSortItems(person.businessContactItems).map(({ lens, items }) => (
+                  <div key={lens} className="mb-0.5">
+                    <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                    {items.map(({ item }, idx) => (
+                      <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                        • {item.name}
+                        {item.primaryArchitect && (
+                          <span className="text-slate-500 dark:text-slate-500 ml-1">
+                            - {item.primaryArchitect}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+            {person.techContactItems.length > 0 && (
+              <div className={person.businessContactItems.length > 0 ? "mb-1" : ""}>
+                <div className="text-[10px] font-medium mb-0.5">Tech:</div>
+                {groupAndSortItems(person.techContactItems).map(({ lens, items }) => (
+                  <div key={lens} className="mb-0.5">
+                    <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                    {items.map(({ item }, idx) => (
+                      <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                        • {item.name}
+                        {item.primaryArchitect && (
+                          <span className="text-slate-500 dark:text-slate-500 ml-1">
+                            - {item.primaryArchitect}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {/* Outstanding Tasks */}
+            {(() => {
+              const stakeholderTasks = tasks.filter(task => {
+                if (task.completedAt) return false
+                const note = meetingNotes.find(n => n.id === task.meetingNoteId)
+                if (!note) return false
+                const participants = note.participants.split(',').map(p => p.trim().toLowerCase())
+                return participants.includes(person.name.toLowerCase())
+              })
+              
+              if (stakeholderTasks.length === 0) return null
+              
+              return (
+                <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+                  <div className="text-[10px] font-medium mb-0.5">Outstanding Tasks:</div>
+                  {stakeholderTasks.map(task => {
+                    const note = meetingNotes.find(n => n.id === task.meetingNoteId)
+                    return (
+                      <div key={task.id} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight mb-1">
+                        <div className="flex items-start gap-1">
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              const now = Date.now()
+                              await db.tasks.update(task.id!, {
+                                completedAt: now,
+                                updatedAt: now,
+                              })
+                              loadData()
+                            }}
+                            className="text-slate-500 hover:text-green-600 flex-shrink-0 mt-0.5"
+                            title="Mark as complete"
+                          >
+                            ○
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium">{task.description}</div>
+                            {task.assignedTo && (
+                              <div className="text-slate-500">
+                                Assigned: <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    onEditPerson?.(task.assignedTo!)
+                                  }}
+                                  className="text-blue-600 dark:text-blue-400 hover:underline"
+                                >
+                                  {task.assignedTo}
+                                </button>
+                              </div>
+                            )}
+                            {task.itemReferences && task.itemReferences.length > 0 && (
+                              <div className="text-slate-500">
+                                Items: {task.itemReferences.map((itemId, idx) => {
+                                  const item = itemMap.get(itemId)
+                                  return item ? (
+                                    <span key={itemId}>
+                                      {idx > 0 && ', '}
+                                      {LENSES.find(l => l.key === item.lens)?.label || item.lens}: {item.name}
+                                    </span>
+                                  ) : null
+                                })}
+                              </div>
+                            )}
+                            {note && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  onOpenMeetingNote?.(note.id!)
+                                }}
+                                className="text-blue-600 dark:text-blue-400 hover:underline text-[9px] mt-0.5"
+                              >
+                                {note.title || '(Untitled)'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Recursive function to render hierarchical structure
+  function renderHierarchy(node: { person: PersonCoverage; level: number; children: Array<{ person: PersonCoverage; level: number; children: any[] }> }) {
+    return (
+      <div key={node.person.name} className="mb-2">
+        {renderPersonBox(node.person, node.level)}
+        {node.children.length > 0 && (
+          <div className="ml-6 mt-2">
+            {node.children.map(child => renderHierarchy(child))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
       <div className="flex items-center gap-4 p-4 border-b border-slate-200 dark:border-slate-800">
@@ -435,6 +768,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
             onChange={e => setTeamFilter(e.target.value as typeof teamFilter)}
             className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
           >
+            <option value="All">All</option>
             <option value="Architecture">Architecture</option>
             <option value="Business Stakeholders">Business Stakeholders</option>
             <option value="Tech Stakeholders">Tech Stakeholders</option>
@@ -459,7 +793,19 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-2">
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 relative">
           <div>
-          {Array.from(groupedPeople.entries())
+          {hierarchicalStructure && managerFilter !== 'All' && managerFilter !== 'Unassigned' && (teamFilter === 'Architecture' || teamFilter === 'All') ? (
+            // Hierarchical view when manager filter is active
+            <div className="mb-4">
+              <h3 className="text-base font-semibold mb-3 text-slate-700 dark:text-slate-300">
+                {managerFilter}
+              </h3>
+              <div className="space-y-2">
+                {renderHierarchy(hierarchicalStructure)}
+              </div>
+            </div>
+          ) : (
+            // Standard grouped view
+            Array.from(groupedPeople.entries())
             .sort(([a], [b]) => {
               // Sort managers: undefined/null last, then alphabetically
               if (!a && !b) return 0
@@ -473,7 +819,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
                 {manager || 'No Manager Assigned'}
               </h3>
               {(() => {
-                if (teamFilter === 'Architecture') {
+                if (teamFilter === 'Architecture' || teamFilter === 'All') {
                   // For Architecture view: separate people with coverage from those with no coverage
                   const peopleWithCoverage: PersonCoverage[] = []
                   const peopleWithNoCoverage: PersonCoverage[] = []
@@ -833,9 +1179,10 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
                 }
               })()}
             </div>
-          ))}
+          ))
+          )}
           {/* "Skills Needed" box for items with skills gaps - only show in architects view, at the bottom */}
-          {teamFilter === 'Architecture' && itemsWithSkillsGaps.length > 0 && (
+          {(teamFilter === 'Architecture' || teamFilter === 'All') && itemsWithSkillsGaps.length > 0 && (
             <div className="mb-4">
               <h3 className="text-base font-semibold mb-2 text-slate-700 dark:text-slate-300">
                 Skills Needed

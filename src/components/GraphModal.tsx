@@ -152,14 +152,28 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     }
   }, [selectedItemId])
 
+  // Create a set of visible item IDs (items in visible lenses)
+  const visibleItemIds = useMemo(() => {
+    return new Set(items.map(item => item.id).filter((id): id is number => !!id))
+  }, [items])
+
   // Filter relationships to only show those related to selected or hovered item
   // When filterToRelated is active, only use selectedItemId (ignore hover)
+  // Also filter out relationships where either item is in a hidden lens
   const visibleRels = useMemo(() => {
     // When filter is active, only show relationships for selected item, not hovered
     const activeItemId = filterToRelated ? selectedItemId : (hoveredItemId || selectedItemId)
     if (!activeItemId) return []
-    return rels.filter(r => r.fromItemId === activeItemId || r.toItemId === activeItemId)
-  }, [rels, selectedItemId, hoveredItemId, filterToRelated])
+    
+    // Filter relationships to only include those where:
+    // 1. They're related to the active item (selected/hovered)
+    // 2. Both items are in visible lenses
+    return rels.filter(r => {
+      const isRelated = r.fromItemId === activeItemId || r.toItemId === activeItemId
+      const bothVisible = visibleItemIds.has(r.fromItemId) && visibleItemIds.has(r.toItemId)
+      return isRelated && bothVisible
+    })
+  }, [rels, selectedItemId, hoveredItemId, filterToRelated, visibleItemIds])
 
   // Get set of related item IDs for highlighting
   // When filterToRelated is active, only use selectedItemId (ignore hover)
@@ -229,7 +243,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     }
     return ordered
   }, [lenses, visible, lensOrderKey, filterToRelated, selectedItemId, filteredItems])
-  const layout = useMemo(() => computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode, showParentBoxes), [filteredItems, dims, visibleLenses, layoutMode, showParentBoxes])
+  const layout = useMemo(() => computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode, showParentBoxes, zoom), [filteredItems, dims, visibleLenses, layoutMode, showParentBoxes, zoom])
 
   function posFor(id?: number) {
     if (!id) return { x: 0, y: 0 }
@@ -334,7 +348,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
           </>
         )}
       </div>
-      <div className="w-full" style={{ paddingTop: '48px' }}>
+      <div style={{ paddingTop: '48px', width: Math.max(dims.w, layout.width * zoom) + 'px', minWidth: '100%' }}>
         <svg 
           width={layout.width} 
           height={layout.height} 
@@ -500,8 +514,8 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             >
               <rect x={n.x - layout.nodeWidth / 2} y={n.y - layout.nodeHeight / 2} width={layout.nodeWidth} height={layout.nodeHeight} rx={6} ry={6} fill={fillColor} stroke={strokeColor} strokeWidth={strokeWidth} />
               
-              {/* Filter icon for selected items - top right corner */}
-              {isSelected && (
+              {/* Filter icon for selected or hovered items - top right corner */}
+              {(isSelected || isHovered) && (
                 <foreignObject
                   x={n.x + layout.nodeWidth / 2 - 20}
                   y={n.y - layout.nodeHeight / 2 + 2}
@@ -511,7 +525,16 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
-                      setFilterToRelated(!filterToRelated)
+                      const newFilterState = !filterToRelated
+                      // If turning filter off, also deselect the item
+                      if (newFilterState === false) {
+                        setSelectedItemId(null)
+                      } else {
+                        // If turning filter on, select the item (same action as clicking on the item)
+                        setSelectedItemId(n.id || null)
+                      }
+                      // Toggle the filter
+                      setFilterToRelated(newFilterState)
                     }}
                     className="w-full h-full flex items-center justify-center rounded border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700"
                     title={filterToRelated ? "Show all items" : "Show only related items"}
@@ -835,10 +858,13 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   )
 }
 
-function computeLayout(items: ItemRecord[], windowW: number, windowH: number, visibleLenses: typeof LENSES, mode: 'columns' | 'rows', showParentBoxes: boolean = true) {
+function computeLayout(items: ItemRecord[], windowW: number, windowH: number, visibleLenses: typeof LENSES, mode: 'columns' | 'rows', showParentBoxes: boolean = true, zoom: number = 1) {
   const padding = 16
-  const availableW = Math.max(320, windowW - padding * 2)
-  const availableH = Math.max(240, windowH - padding * 2)
+  // When zoomed in (zoom > 1), calculate layout with more space to fit more items per row
+  // Divide by zoom to account for the fact that we'll scale up, so we need less base space
+  // When zoom is 2.0, we want 2x the items, so we calculate with 1/2 the space, then scale 2x
+  const availableW = Math.max(320, (windowW / zoom) - padding * 2)
+  const availableH = Math.max(240, (windowH / zoom) - padding * 2)
   const topOffset = 30
   const nodeHeight = 70 // Increased for wrapped text
   const rowGap = 6
@@ -971,6 +997,8 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
       
       currentY += headerHeight + headerGap
       
+      // Calculate items per row based on available width, accounting for zoom
+      // When zoomed in, we have more effective space, so fit more items
       const itemsPerRow = Math.max(1, Math.floor((availableW - padding * 2) / 170))
       const itemWidth = Math.floor((availableW - padding * 2 - colGap * (itemsPerRow - 1)) / itemsPerRow)
       

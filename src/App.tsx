@@ -370,6 +370,7 @@ function App() {
         {(currentView === 'architects' || currentView === 'stakeholders') && (
           <TeamModal
             refreshKey={teamModalRefreshKey}
+            visible={visible}
             onOpenMeetingNote={(noteId) => {
               setMeetingNoteToOpen(noteId)
               handleNavigate('meeting-notes')

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db, getAllItemNames } from '../db'
-import { type ItemRecord, type TeamMember, type MeetingNote, type Task, LENSES } from '../types'
+import { type ItemRecord, type TeamMember, type MeetingNote, type Task, LENSES, type LensKey } from '../types'
 type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes'
 
 interface TeamModalProps {
@@ -8,6 +8,7 @@ interface TeamModalProps {
   refreshKey?: number
   onOpenMeetingNote?: (noteId: number) => void
   onNavigate: (view: ViewType) => void
+  visible?: Record<LensKey, boolean>
 }
 
 interface PersonCoverage {
@@ -51,7 +52,7 @@ function groupAndSortItems(items: Array<{ item: ItemRecord; lens: string }>): Ar
     .sort((a, b) => a.lens.localeCompare(b.lens))
 }
 
-export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavigate: _onNavigate }: TeamModalProps) {
+export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavigate: _onNavigate, visible }: TeamModalProps) {
   const [teamFilter, setTeamFilter] = useState<'Architecture' | 'Business Stakeholders' | 'Tech Stakeholders' | 'All Stakeholders'>('Architecture')
   const [managerFilter, setManagerFilter] = useState<string>('All')
   const [items, setItems] = useState<ItemRecord[]>([])
@@ -88,6 +89,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
   // Calculate coverage for each person
   const personCoverage = useMemo(() => {
     const coverage = new Map<string, PersonCoverage>()
+    const visibleLenses = visible || {}
 
     // Initialize with team members based on team filter
     const shouldIncludeArchitecture = teamFilter === 'Architecture'
@@ -122,7 +124,19 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
     })
 
     // Process items to calculate coverage
-    items.forEach(item => {
+    // Filter items to only include those from visible lenses
+    const visibleItems = items.filter(item => {
+      // If visible prop is not provided or empty, show all items (backward compatibility)
+      if (!visibleLenses || Object.keys(visibleLenses).length === 0) return true
+      // Only include items from lenses that are explicitly set to true
+      // If a lens key doesn't exist in visibleLenses, default to showing it (for new lenses)
+      const lensKey = item.lens as LensKey
+      const isVisible = visibleLenses[lensKey]
+      // Explicitly false means hidden, true means visible, undefined means show (new lens)
+      return isVisible !== false
+    })
+    
+    visibleItems.forEach(item => {
       const lensLabel = LENSES.find(l => l.key === item.lens)?.label || item.lens
 
       // Primary architect
@@ -301,8 +315,8 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
       }
     }
 
-    return filtered
-  }, [items, teamMembers, teamFilter, managerFilter])
+        return filtered
+      }, [items, teamMembers, teamFilter, managerFilter, visible])
 
   // Group by manager, then by coverage
   const groupedPeople = useMemo(() => {
@@ -387,8 +401,23 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
 
   // Get items with skills gaps for the "New" box
   const itemsWithSkillsGaps = useMemo(() => {
-    return items.filter(item => item.skillsGaps && item.skillsGaps.trim().length > 0)
-  }, [items])
+    const visibleLenses = visible || {}
+    return items.filter(item => {
+      // If visible prop is not provided or empty, show all items (backward compatibility)
+      if (!visibleLenses || Object.keys(visibleLenses).length === 0) {
+        return item.skillsGaps && item.skillsGaps.trim().length > 0
+      }
+      // Only include items from lenses that are not explicitly set to false
+      // If a lens key doesn't exist in visibleLenses, default to showing it (for new lenses)
+      const lensKey = item.lens as LensKey
+      const isVisible = visibleLenses[lensKey]
+      // Explicitly false means hidden, true/undefined means visible
+      if (isVisible === false) {
+        return false
+      }
+      return item.skillsGaps && item.skillsGaps.trim().length > 0
+    })
+  }, [items, visible])
 
   function getCoverageColor(): string {
     // All boxes use white background with standard border
@@ -443,28 +472,37 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
               <h3 className="text-base font-semibold mb-2 text-slate-700 dark:text-slate-300">
                 {manager || 'No Manager Assigned'}
               </h3>
-              {((teamFilter === 'Architecture')
-                ? (['high', 'medium', 'low', 'none'] as CoverageGroup[])
-                : (['all'] as CoverageGroup[])
-              ).map(coverageGroup => {
-                const people = managerGroup.get(coverageGroup) || []
-                // Don't show empty groups
-                if (people.length === 0) return null
+              {(() => {
+                if (teamFilter === 'Architecture') {
+                  // For Architecture view: separate people with coverage from those with no coverage
+                  const peopleWithCoverage: PersonCoverage[] = []
+                  const peopleWithNoCoverage: PersonCoverage[] = []
+                  
+                  // Collect people with coverage (high, medium, low)
+                  ;(['high', 'medium', 'low'] as CoverageGroup[]).forEach(coverageGroup => {
+                    const people = managerGroup.get(coverageGroup) || []
+                    peopleWithCoverage.push(...people)
+                  })
+                  
+                  // Collect people with no coverage
+                  const noCoveragePeople = managerGroup.get('none') || []
+                  peopleWithNoCoverage.push(...noCoveragePeople)
 
-                return (
-                  <div key={coverageGroup} className="mb-3">
-                    {teamFilter === 'Architecture' && coverageGroup === 'none' && (
-                      <h4 className="text-xs font-medium mb-1.5 text-slate-600 dark:text-slate-400 uppercase tracking-wide">
-                        No Coverage
-                      </h4>
-                    )}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
-                      {people.map(person => (
+                  // If no people at all, return null
+                  if (peopleWithCoverage.length === 0 && peopleWithNoCoverage.length === 0) return null
+
+                  return (
+                    <>
+                      {/* People with coverage */}
+                      {peopleWithCoverage.length > 0 && (
+                        <div className="mb-3">
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 auto-rows-min items-start">
+                            {peopleWithCoverage.map(person => (
                         <div
                           key={person.name}
                           className={`p-2 rounded border-2 ${getCoverageColor()} ${
                             teamFilter === 'Architecture' && !person.hasPrimary && person.secondaryCount > 0 ? 'border-dashed' : ''
-                          } bg-white dark:bg-slate-900`}
+                          } bg-white dark:bg-slate-900 min-w-0`}
                         >
                           <div className="flex items-center gap-1.5 mb-1.5">
                             <div 
@@ -486,60 +524,182 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
                             )}
                           </div>
 
-                          {teamFilter === 'Architecture' ? (
-                            <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
-                              {person.primaryItems.length > 0 && (
-                                <div className="mb-1">
-                                  <div className="text-[10px] font-medium mb-0.5">Primary:</div>
-                                  {groupAndSortItems(person.primaryItems).map(({ lens, items }) => (
-                                    <div key={lens} className="mb-0.5">
-                                      <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
-                                      {items.map(({ item }, idx) => (
-                                        <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
-                                          • {item.name}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ))}
+                          <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+                            {person.primaryItems.length > 0 && (
+                              <div className="mb-1">
+                                <div className="text-[10px] font-medium mb-0.5">Primary:</div>
+                                {groupAndSortItems(person.primaryItems).map(({ lens, items }) => (
+                                  <div key={lens} className="mb-0.5">
+                                    <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                    {items.map(({ item }, idx) => (
+                                      <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                        • {item.name}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {person.secondaryItems.length > 0 && (
+                              <div>
+                                <div className="text-[10px] font-medium mb-0.5">Secondary:</div>
+                                {groupAndSortItems(person.secondaryItems).map(({ lens, items }) => (
+                                  <div key={lens} className="mb-0.5">
+                                    <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                    {items.map(({ item }, idx) => (
+                                      <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                        • {item.name}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {person.primaryItems.length === 0 && person.secondaryItems.length === 0 && (
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400 italic">
+                                No items assigned
+                              </div>
+                            )}
+                            {person.hasDirectReports && person.teamItems.length > 0 && (
+                              <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+                                <div className="text-[10px] font-medium mb-0.5">Team:</div>
+                                {groupAndSortItems(person.teamItems).map(({ lens, items }) => (
+                                  <div key={lens} className="mb-0.5">
+                                    <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                    {items.map(({ item }, idx) => (
+                                      <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                        • {item.name}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* People with no coverage - separate section */}
+                      {peopleWithNoCoverage.length > 0 && (
+                        <div className="mb-3">
+                          <h4 className="text-xs font-medium mb-1.5 text-slate-600 dark:text-slate-400 uppercase tracking-wide">
+                            No Coverage
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 auto-rows-min items-start">
+                            {peopleWithNoCoverage.map(person => (
+                              <div
+                                key={person.name}
+                                className={`p-2 rounded border-2 ${getCoverageColor()} ${
+                                  !person.hasPrimary && person.secondaryCount > 0 ? 'border-dashed' : ''
+                                } bg-white dark:bg-slate-900 min-w-0`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1.5">
+                                  <div 
+                                    className="font-semibold text-sm text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                                    onClick={() => onEditPerson?.(person.name)}
+                                    title="Click to edit person"
+                                  >
+                                    {person.name}
+                                  </div>
+                                  {person.hasPrimary && (
+                                    <span className="text-[10px] px-1 py-0.5 bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded">
+                                      Key
+                                    </span>
+                                  )}
+                                  {!person.hasPrimary && person.secondaryCount > 0 && (
+                                    <span className="text-[10px] px-1 py-0.5 bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-blue-200 rounded">
+                                      Sec
+                                    </span>
+                                  )}
                                 </div>
-                              )}
-                              {person.secondaryItems.length > 0 && (
-                                <div>
-                                  <div className="text-[10px] font-medium mb-0.5">Secondary:</div>
-                                  {groupAndSortItems(person.secondaryItems).map(({ lens, items }) => (
-                                    <div key={lens} className="mb-0.5">
-                                      <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
-                                      {items.map(({ item }, idx) => (
-                                        <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
-                                          • {item.name}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {person.primaryItems.length === 0 && person.secondaryItems.length === 0 && (
-                                <div className="text-[10px] text-slate-500 dark:text-slate-400 italic">
-                                  No items assigned
-                                </div>
-                              )}
-                              {person.hasDirectReports && person.teamItems.length > 0 && (
+
                                 <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
-                                  <div className="text-[10px] font-medium mb-0.5">Team:</div>
-                                  {groupAndSortItems(person.teamItems).map(({ lens, items }) => (
-                                    <div key={lens} className="mb-0.5">
-                                      <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
-                                      {items.map(({ item }, idx) => (
-                                        <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
-                                          • {item.name}
+                                  {person.primaryItems.length > 0 && (
+                                    <div className="mb-1">
+                                      <div className="text-[10px] font-medium mb-0.5">Primary:</div>
+                                      {groupAndSortItems(person.primaryItems).map(({ lens, items }) => (
+                                        <div key={lens} className="mb-0.5">
+                                          <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                          {items.map(({ item }, idx) => (
+                                            <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                              • {item.name}
+                                            </div>
+                                          ))}
                                         </div>
                                       ))}
                                     </div>
-                                  ))}
+                                  )}
+                                  {person.secondaryItems.length > 0 && (
+                                    <div>
+                                      <div className="text-[10px] font-medium mb-0.5">Secondary:</div>
+                                      {groupAndSortItems(person.secondaryItems).map(({ lens, items }) => (
+                                        <div key={lens} className="mb-0.5">
+                                          <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                          {items.map(({ item }, idx) => (
+                                            <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                              • {item.name}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {person.primaryItems.length === 0 && person.secondaryItems.length === 0 && (
+                                    <div className="text-[10px] text-slate-500 dark:text-slate-400 italic">
+                                      No items assigned
+                                    </div>
+                                  )}
+                                  {person.hasDirectReports && person.teamItems.length > 0 && (
+                                    <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+                                      <div className="text-[10px] font-medium mb-0.5">Team:</div>
+                                      {groupAndSortItems(person.teamItems).map(({ lens, items }) => (
+                                        <div key={lens} className="mb-0.5">
+                                          <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                          {items.map(({ item }, idx) => (
+                                            <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                              • {item.name}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
-                              )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )
+                } else {
+                  // For stakeholders view: single grid for all people
+                  const allPeople: PersonCoverage[] = []
+                  const people = managerGroup.get('all') || []
+                  allPeople.push(...people)
+
+                  if (allPeople.length === 0) return null
+
+                  return (
+                    <div className="mb-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 auto-rows-min items-start">
+                        {allPeople.map(person => (
+                          <div
+                            key={person.name}
+                            className="p-2 rounded border-2 bg-white dark:bg-slate-900 min-w-0"
+                          >
+                            <div className="flex items-center gap-1.5 mb-1.5">
+                              <div 
+                                className="font-semibold text-sm text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                                onClick={() => onEditPerson?.(person.name)}
+                                title="Click to edit person"
+                              >
+                                {person.name}
+                              </div>
                             </div>
-                          ) : (
                             <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
                               {person.businessContactItems.length > 0 && (
                                 <div className="mb-1">
@@ -584,14 +744,10 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
                               
                               {/* Outstanding Tasks */}
                               {(() => {
-                                // Find all outstanding tasks from meetings where this stakeholder was a participant
                                 const stakeholderTasks = tasks.filter(task => {
-                                  if (task.completedAt) return false // Only outstanding tasks
-                                  
+                                  if (task.completedAt) return false
                                   const note = meetingNotes.find(n => n.id === task.meetingNoteId)
                                   if (!note) return false
-                                  
-                                  // Check if stakeholder name appears in participants (comma-separated list)
                                   const participants = note.participants.split(',').map(p => p.trim().toLowerCase())
                                   return participants.includes(person.name.toLowerCase())
                                 })
@@ -614,7 +770,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
                                                   completedAt: now,
                                                   updatedAt: now,
                                                 })
-                                                loadData() // Reload to refresh display
+                                                loadData()
                                               }}
                                               className="text-slate-500 hover:text-green-600 flex-shrink-0 mt-0.5"
                                               title="Mark as complete"
@@ -669,13 +825,13 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
                                 )
                               })()}
                             </div>
-                          )}
-                        </div>
-                      ))}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
+                  )
+                }
+              })()}
             </div>
           ))}
           {/* "Skills Needed" box for items with skills gaps - only show in architects view, at the bottom */}
@@ -684,13 +840,13 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
               <h3 className="text-base font-semibold mb-2 text-slate-700 dark:text-slate-300">
                 Skills Needed
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 auto-rows-min items-start">
                 {itemsWithSkillsGaps.map(item => {
                   const lensLabel = LENSES.find(l => l.key === item.lens)?.label || item.lens
                   return (
                     <div
                       key={item.id}
-                      className="p-2 rounded border-2 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700"
+                      className="p-2 rounded border-2 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 min-w-0"
                     >
                       <div className="font-semibold text-sm text-slate-800 dark:text-slate-200 mb-1.5">
                         {item.name}

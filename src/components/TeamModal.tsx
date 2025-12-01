@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { db, getAllItemNames } from '../db'
 import { type ItemRecord, type TeamMember, type MeetingNote, type Task, LENSES, type LensKey } from '../types'
 type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes'
@@ -743,16 +743,245 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
     )
   }
 
-  // Recursive function to render hierarchical structure
-  function renderHierarchy(node: { person: PersonCoverage; level: number; children: Array<{ person: PersonCoverage; level: number; children: any[] }> }) {
+  // Convert hierarchy to levels for tree structure rendering
+  const hierarchyByLevel = useMemo(() => {
+    if (!hierarchicalStructure) return []
+    
+    interface LevelNode {
+      person: PersonCoverage
+      parent?: string
+      id: string
+    }
+    
+    const levels: LevelNode[][] = []
+    
+    function collectByLevel(node: { person: PersonCoverage; level: number; children: Array<{ person: PersonCoverage; level: number; children: any[] }> }, parent?: string) {
+      const level = node.level
+      if (!levels[level]) {
+        levels[level] = []
+      }
+      levels[level].push({
+        person: node.person,
+        parent,
+        id: node.person.name
+      })
+      
+      node.children.forEach(child => {
+        collectByLevel(child, node.person.name)
+      })
+    }
+    
+    collectByLevel(hierarchicalStructure)
+    return levels.filter(level => level.length > 0)
+  }, [hierarchicalStructure])
+
+  // State to track box positions for accurate line drawing
+  const [boxPositions, setBoxPositions] = useState<Map<string, { x: number; y: number; width: number; height: number }>>(new Map())
+  const boxRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
+  // Container ref for position calculations
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Update box positions after render
+  useEffect(() => {
+    if (hierarchyByLevel.length === 0) {
+      setBoxPositions(new Map())
+      return
+    }
+    
+    const updatePositions = () => {
+      const positions = new Map<string, { x: number; y: number; width: number; height: number }>()
+      const container = containerRef.current
+      
+      if (!container) return
+      
+      const containerRect = container.getBoundingClientRect()
+      
+      // Check that we have refs for all expected boxes
+      const expectedBoxCount = hierarchyByLevel.reduce((sum, level) => sum + level.length, 0)
+      const actualRefCount = boxRefs.current.size
+      
+      // Wait for all boxes to be rendered
+      if (actualRefCount < expectedBoxCount) {
+        // Some refs aren't set yet, try again after a delay
+        // Use a longer delay to ensure flex-wrap has completed layout
+        setTimeout(updatePositions, 200)
+        return
+      }
+      
+      // Calculate positions for all boxes
+      boxRefs.current.forEach((element, id) => {
+        if (element) {
+          const rect = element.getBoundingClientRect()
+          positions.set(id, {
+            x: rect.left - containerRect.left + rect.width / 2,
+            y: rect.top - containerRect.top,
+            width: rect.width,
+            height: rect.height
+          })
+        }
+      })
+      
+      // Only update if we have positions for all expected boxes
+      if (positions.size === expectedBoxCount && positions.size > 0) {
+        setBoxPositions(positions)
+      } else if (positions.size > 0 && actualRefCount === expectedBoxCount) {
+        // If we have all refs but some positions are missing, still update with what we have
+        setBoxPositions(positions)
+      }
+    }
+    
+    // Update positions after layout is complete
+    // Use multiple requestAnimationFrame calls and a timeout to ensure all boxes are rendered and laid out
+    let frameId1: number
+    let frameId2: number
+    let frameId3: number
+    let timeoutId: ReturnType<typeof setTimeout>
+    
+    frameId1 = requestAnimationFrame(() => {
+      frameId2 = requestAnimationFrame(() => {
+        frameId3 = requestAnimationFrame(() => {
+          // Add an additional timeout to ensure flex-wrap layout is complete
+          timeoutId = setTimeout(() => {
+            updatePositions()
+          }, 100)
+        })
+      })
+    })
+    
+    window.addEventListener('resize', updatePositions)
+    
+    // Also use MutationObserver to detect when DOM changes
+    const observer = new MutationObserver(() => {
+      setTimeout(updatePositions, 150)
+    })
+    
+    if (containerRef.current) {
+      observer.observe(containerRef.current, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class']
+      })
+    }
+    
+    return () => {
+      cancelAnimationFrame(frameId1)
+      if (frameId2) cancelAnimationFrame(frameId2)
+      if (frameId3) cancelAnimationFrame(frameId3)
+      if (timeoutId) clearTimeout(timeoutId)
+      window.removeEventListener('resize', updatePositions)
+      observer.disconnect()
+    }
+  }, [hierarchyByLevel, personCoverage])
+
+  // Render tree structure with relationship lines
+  function renderTreeStructure() {
+    if (!hierarchicalStructure || hierarchyByLevel.length === 0) return null
+    
     return (
-      <div key={node.person.name} className="mb-2">
-        {renderPersonBox(node.person, node.level)}
-        {node.children.length > 0 && (
-          <div className="ml-6 mt-2">
-            {node.children.map(child => renderHierarchy(child))}
-          </div>
-        )}
+      <div ref={containerRef} className="tree-container relative">
+        {/* SVG overlay for relationship lines - positioned absolutely to cover the container */}
+        <svg 
+          className="absolute top-0 left-0 w-full h-full pointer-events-none z-0"
+          style={{ overflow: 'visible' }}
+        >
+          {hierarchyByLevel.slice(1).map((level, levelIndex) => {
+            const actualLevel = levelIndex + 1
+            const parentLevel = hierarchyByLevel[actualLevel - 1]
+            
+            return level.map((node) => {
+              if (!node.parent) return null
+              
+              const parentNode = parentLevel.find(p => p.person.name === node.parent)
+              if (!parentNode) return null
+              
+              const parentPos = boxPositions.get(parentNode.id)
+              const childPos = boxPositions.get(node.id)
+              
+              // Only draw line if we have valid positions for both boxes
+              if (!parentPos || !childPos || parentPos.height === 0 || childPos.height === 0) {
+                return null
+              }
+              
+              // Calculate line positions
+              // Start from bottom center of parent box
+              const startX = parentPos.x
+              const startY = parentPos.y + parentPos.height
+              
+              // End at top center of child box
+              const endX = childPos.x
+              const endY = childPos.y
+              
+              // Calculate midpoint for horizontal connector
+              const midY = (startY + endY) / 2
+              
+              // Only render if positions are valid (non-zero)
+              if (startX === 0 && startY === 0 && endX === 0 && endY === 0) {
+                return null
+              }
+              
+              return (
+                <g key={`line-${node.parent}-${node.person.name}`}>
+                  {/* Vertical line from parent bottom */}
+                  <line
+                    x1={startX}
+                    y1={startY}
+                    x2={startX}
+                    y2={midY}
+                    stroke="#94a3b8"
+                    strokeWidth="2"
+                  />
+                  {/* Horizontal connector */}
+                  <line
+                    x1={startX}
+                    y1={midY}
+                    x2={endX}
+                    y2={midY}
+                    stroke="#94a3b8"
+                    strokeWidth="2"
+                  />
+                  {/* Vertical line to child top */}
+                  <line
+                    x1={endX}
+                    y1={midY}
+                    x2={endX}
+                    y2={endY}
+                    stroke="#94a3b8"
+                    strokeWidth="2"
+                  />
+                </g>
+              )
+            }).filter(Boolean)
+          })}
+        </svg>
+        
+        {/* Person boxes by level */}
+        <div className="relative z-10">
+          {hierarchyByLevel.map((level, levelIndex) => (
+            <div key={levelIndex} className="relative mb-8">
+              {/* Person boxes in this level */}
+              <div className="flex flex-wrap justify-center gap-4 items-start">
+                {level.map((node) => (
+                  <div 
+                    key={node.id} 
+                    ref={(el) => {
+                      if (el) {
+                        boxRefs.current.set(node.id, el)
+                      } else {
+                        boxRefs.current.delete(node.id)
+                      }
+                    }}
+                    className="flex-shrink-0" 
+                    style={{ width: '200px' }}
+                  >
+                    {renderPersonBox(node.person, 0)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
@@ -794,14 +1023,12 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 relative">
           <div>
           {hierarchicalStructure && managerFilter !== 'All' && managerFilter !== 'Unassigned' && (teamFilter === 'Architecture' || teamFilter === 'All') ? (
-            // Hierarchical view when manager filter is active
+            // Tree structure view when manager filter is active
             <div className="mb-4">
               <h3 className="text-base font-semibold mb-3 text-slate-700 dark:text-slate-300">
                 {managerFilter}
               </h3>
-              <div className="space-y-2">
-                {renderHierarchy(hierarchicalStructure)}
-              </div>
+              {renderTreeStructure()}
             </div>
           ) : (
             // Standard grouped view

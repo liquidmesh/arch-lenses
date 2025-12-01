@@ -219,67 +219,113 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     })
 
     // Assign unique hues to all managers
-    // Use a wider range of hues for better distinction
-    const baseHues: number[] = []
-    // Generate more hues for better distribution (every 30 degrees gives 12 distinct colors)
-    for (let i = 0; i < 360; i += 30) {
-      baseHues.push(i)
-    }
-    
+    // Completely avoid red hues (0-30 and 330-360) to prevent any red colors
+    // Use a safe range: 30-330 degrees (300 degrees of safe color space)
     const managerHues = new Map<string, number>()
     const usedHues = new Set<number>()
+    const minHueSeparation = 25 // Minimum degrees between any two manager colors for easy distinction
     
-    // First, assign hues to top-level managers
+    // Helper function to normalize hue to safe range (30-330)
+    function normalizeHue(hue: number): number {
+      // Normalize to 0-360 range
+      let normalized = ((hue % 360) + 360) % 360
+      // If in red range, shift to safe range
+      if (normalized >= 0 && normalized <= 30) {
+        normalized = 30
+      } else if (normalized >= 330 && normalized <= 360) {
+        normalized = 330
+      }
+      return normalized
+    }
+    
+    // Helper function to check if a hue is sufficiently different from all used hues
+    function isHueSufficientlyDifferent(hue: number, usedHues: Set<number>, minSeparation: number): boolean {
+      for (const usedHue of usedHues) {
+        // Calculate the minimum circular distance between hues
+        const diff1 = Math.abs(hue - usedHue)
+        const diff2 = Math.abs(hue - (usedHue + 360))
+        const diff3 = Math.abs(hue - (usedHue - 360))
+        const minDiff = Math.min(diff1, diff2, diff3)
+        if (minDiff < minSeparation) {
+          return false
+        }
+      }
+      return true
+    }
+    
+    // Helper function to find the next available hue that's sufficiently different
+    function findDistinctHue(startHue: number, usedHues: Set<number>, minSeparation: number): number {
+      // Try the start hue first
+      if (isHueSufficientlyDifferent(startHue, usedHues, minSeparation)) {
+        return normalizeHue(startHue)
+      }
+      
+      // Try incrementing by minSeparation steps
+      for (let offset = minSeparation; offset < 300; offset += minSeparation) {
+        const candidate1 = normalizeHue(startHue + offset)
+        if (isHueSufficientlyDifferent(candidate1, usedHues, minSeparation)) {
+          return candidate1
+        }
+        const candidate2 = normalizeHue(startHue - offset)
+        if (isHueSufficientlyDifferent(candidate2, usedHues, minSeparation)) {
+          return candidate2
+        }
+      }
+      
+      // If still not found, try every 5 degrees in the safe range
+      for (let i = 30; i <= 330; i += 5) {
+        if (isHueSufficientlyDifferent(i, usedHues, minSeparation)) {
+          return i
+        }
+      }
+      
+      // Last resort: return the start hue normalized (will be close but distinct enough)
+      return normalizeHue(startHue)
+    }
+    
+    // First, assign hues to top-level managers, evenly distributed
     const topLevelArray = Array.from(topLevelManagers)
+    const totalManagers = allManagers.size
+    // Calculate spacing to distribute colors evenly across available range
+    const hueSpacing = totalManagers > 1 ? Math.floor(300 / totalManagers) : 300
+    const baseHueStart = 30
+    
     topLevelArray.forEach((managerName, idx) => {
-      const hue = baseHues[idx % baseHues.length]
+      // Distribute top-level managers evenly across the hue range
+      const baseHue = baseHueStart + (idx * hueSpacing)
+      const hue = findDistinctHue(baseHue, usedHues, minHueSeparation)
       managerHues.set(managerName, hue)
       usedHues.add(hue)
     })
 
-    // Then assign unique hues to sub-managers, using variations of their parent's hue
+    // Then assign unique hues to sub-managers, ensuring they're distinct from all other managers
     function assignHueToSubManagers(parentName: string, parentHue: number, depth: number = 0) {
       const reports = managerHierarchy.get(parentName) || []
       if (reports.length === 0) return
       
-      // For each sub-manager, assign a unique hue that's a variation of the parent
-      // Use a shift that ensures uniqueness while maintaining visual relationship
-      const hueShift = 15 // Shift by 15 degrees for each level
-      const maxDepth = 3 // Limit depth to avoid too many shifts
-      const actualDepth = Math.min(depth, maxDepth)
+      // For sub-managers, we want colors that are:
+      // 1. Related to parent (but not too close)
+      // 2. Distinct from all other managers (including siblings)
+      // 3. At least minHueSeparation degrees from any existing color
+      const baseShift = minHueSeparation + 10 // Start with a shift larger than minimum separation
+      const siblingShift = minHueSeparation + 5 // Additional shift for each sibling
       
       reports.forEach((subManagerName, idx) => {
         if (managerHues.has(subManagerName)) return // Already assigned
         
-        // Calculate a variation of the parent hue
-        // For first sub-manager: shift by hueShift
-        // For subsequent sub-managers: shift by additional amounts
-        const shift = (actualDepth + 1) * hueShift + (idx * 10) // Additional shift for multiple siblings
-        let subHue = (parentHue + shift) % 360
+        // Calculate a starting hue that's related to parent but distinct
+        // Shift by baseShift + additional for each sibling
+        const shift = baseShift + (idx * siblingShift)
+        const startHue = normalizeHue(parentHue + shift)
         
-        // Ensure uniqueness: if this hue is already used, find the next available one
-        let attempts = 0
-        while (usedHues.has(subHue) && attempts < 36) {
-          subHue = (subHue + 10) % 360 // Try next 10-degree increment
-          attempts++
-        }
-        
-        // If still not unique, find any unused hue
-        if (usedHues.has(subHue)) {
-          for (let i = 0; i < 360; i += 5) {
-            const candidateHue = (parentHue + i) % 360
-            if (!usedHues.has(candidateHue)) {
-              subHue = candidateHue
-              break
-            }
-          }
-        }
+        // Find a hue that's sufficiently different from all used hues
+        const subHue = findDistinctHue(startHue, usedHues, minHueSeparation)
         
         managerHues.set(subManagerName, subHue)
         usedHues.add(subHue)
         
         // Recursively assign to their sub-managers
-        assignHueToSubManagers(subManagerName, subHue, actualDepth + 1)
+        assignHueToSubManagers(subManagerName, subHue, depth + 1)
       })
     }
 
@@ -291,7 +337,21 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
 
     // Generate colors for all managers
     allManagers.forEach(managerName => {
-      const hue = managerHues.get(managerName) || 0
+      let hue = managerHues.get(managerName)
+      
+      // Final safety check: ensure hue is in safe range (30-330, avoiding red)
+      if (hue === undefined) {
+        // Fallback: use a safe blue hue if somehow undefined
+        hue = 210
+      } else {
+        // Normalize to safe range one more time
+        hue = ((hue % 360) + 360) % 360
+        if (hue >= 0 && hue <= 30) {
+          hue = 30
+        } else if (hue >= 330 && hue <= 360) {
+          hue = 330
+        }
+      }
       
       // Top-level: full saturation, medium lightness
       // Sub-managers: same hue family, adjusted saturation/lightness to show hierarchy
@@ -369,18 +429,6 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     return generateManagerColors(teamMembers)
   }, [teamMembers])
 
-  // Get list of managers for dropdown (only Architecture team members who are managers)
-  const managerList = useMemo(() => {
-    const managers = new Set<string>()
-    teamMembers.forEach(member => {
-      // Check if this person is a manager (has people reporting to them)
-      const isManager = teamMembers.some(m => m.manager === member.name)
-      if (isManager) {
-        managers.add(member.name)
-      }
-    })
-    return Array.from(managers).sort()
-  }, [teamMembers])
 
   // Filter relationships to only show those related to selected or hovered item
   // When filterToRelated is active, only use selectedItemId (ignore hover)
@@ -500,57 +548,194 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     return ordered
   }, [lenses, visible, lensOrderKey, filterToRelated, selectedItemId, filteredItems, filterToManager, selectedManagerForFilter])
   
+  // Build manager hierarchy structure
+  const managerHierarchy = useMemo(() => {
+    if (viewMode !== 'skillGaps') return { topLevel: [], hierarchy: new Map<string, string[]>(), parentMap: new Map<string, string>() }
+    
+    const allManagers = new Set<string>()
+    teamMembers.forEach(member => {
+      const isManager = teamMembers.some(m => m.manager === member.name)
+      if (isManager) {
+        allManagers.add(member.name)
+      }
+    })
+    
+    // Identify top-level managers (those with no manager in the Architecture team)
+    const topLevelManagers: string[] = []
+    allManagers.forEach(managerName => {
+      const manager = teamMembers.find(m => m.name === managerName)
+      if (!manager || !manager.manager || !allManagers.has(manager.manager)) {
+        topLevelManagers.push(managerName)
+      }
+    })
+    
+    // Build hierarchy: map each manager to their direct reports (who are also managers)
+    const hierarchy = new Map<string, string[]>()
+    const parentMap = new Map<string, string>() // Map child to parent
+    allManagers.forEach(managerName => {
+      const reports = teamMembers
+        .filter(m => m.manager === managerName && allManagers.has(m.name))
+        .map(m => m.name)
+      hierarchy.set(managerName, reports)
+      reports.forEach(report => {
+        parentMap.set(report, managerName)
+      })
+    })
+    
+    return { topLevel: topLevelManagers.sort(), hierarchy, parentMap }
+  }, [viewMode, teamMembers])
+
+  // Determine which managers should be visible based on filter state
+  const visibleManagers = useMemo(() => {
+    if (viewMode !== 'skillGaps') return new Set<string>()
+    
+    // If no filter is active, show all managers
+    if (!filterToManager || !selectedManagerForFilter) {
+      const allManagers = new Set<string>()
+      teamMembers.forEach(member => {
+        const isManager = teamMembers.some(m => m.manager === member.name)
+        if (isManager) {
+          allManagers.add(member.name)
+        }
+      })
+      return allManagers
+    }
+    
+    // When filter is active, show only the selected manager and all managers in its hierarchy
+    const visible = new Set<string>()
+    const { hierarchy, parentMap } = managerHierarchy
+    
+    // Add the selected manager
+    visible.add(selectedManagerForFilter)
+    
+    // Recursively add all children (sub-managers)
+    function addChildren(managerName: string) {
+      const children = hierarchy.get(managerName) || []
+      children.forEach(child => {
+        visible.add(child)
+        addChildren(child) // Recursively add grandchildren, etc.
+      })
+    }
+    addChildren(selectedManagerForFilter)
+    
+    // Add all parents up the chain
+    function addParents(managerName: string) {
+      const parent = parentMap.get(managerName)
+      if (parent) {
+        visible.add(parent)
+        addParents(parent) // Recursively add grandparents, etc.
+      }
+    }
+    addParents(selectedManagerForFilter)
+    
+    return visible
+  }, [viewMode, filterToManager, selectedManagerForFilter, managerHierarchy, teamMembers])
+
   // Get manager positions (only in Architecture Coverage view)
+  // Positions managers hierarchically: top-level in first row, sub-managers below their parent
   const managerPositions = useMemo(() => {
     if (viewMode !== 'skillGaps') return new Map<string, { x: number; y: number }>()
     
     const positions = new Map<string, { x: number; y: number }>()
-    const managers = managerList
-    if (managers.length === 0) return positions
+    const { topLevel, hierarchy } = managerHierarchy
+    if (topLevel.length === 0) return positions
     
-    const managerRowHeight = 70
+    // Filter top-level managers to only include visible ones
+    const visibleTopLevel = topLevel.filter(name => visibleManagers.has(name))
+    if (visibleTopLevel.length === 0) return positions
+    
+    const managerBoxHeight = 35 // Half the height of regular items (70 / 2)
     const managerGap = 5
     const managerWidth = 160
     const padding = 16
     const availableW = Math.max(320, (dims.w / zoom) - padding * 2)
-    
-    // Calculate how many managers fit per row
-    const managersPerRow = Math.floor((availableW - padding * 2) / (managerWidth + managerGap))
-    const actualManagersPerRow = Math.max(1, managersPerRow)
+    const verticalGap = 20 // Gap between parent and child managers
     
     // Position manager boxes with minimal spacing (2px gap above and below)
-    // Menu/header is positioned absolutely at top-0, SVG has paddingTop: 48px
-    // Menu is approximately 30-35px tall, but SVG starts at 48px, so menu bottom is at ~35px from viewport top
-    // In SVG coordinates (starting at 48px), menu bottom is at 35-48 = -13px, so we position at 0 + 2px gap
-    // First box top = 2px from SVG top (which is 50px from viewport top, just below menu)
     const topGap = 2
-    const rowGap = 2 // Minimal gap between rows
-    const firstBoxTop = topGap // Top edge of first box in SVG coordinates (2px from SVG start)
+    const firstBoxTop = topGap
     
-    managers.forEach((manager, idx) => {
-      const row = Math.floor(idx / actualManagersPerRow)
-      const col = idx % actualManagersPerRow
-      const x = padding + col * (managerWidth + managerGap) + managerWidth / 2
-      // Box center = first box top + row offset + half box height
-      const y = firstBoxTop + row * (managerRowHeight + rowGap) + managerRowHeight / 2
-      positions.set(manager, { x, y })
+    // Recursive function to position managers hierarchically
+    function positionManager(managerName: string, startX: number, startY: number, level: number = 0): { x: number; y: number; width: number; height: number } {
+      // Only position visible managers
+      if (!visibleManagers.has(managerName)) {
+        return { x: startX, y: startY, width: 0, height: 0 }
+      }
+      
+      const children = hierarchy.get(managerName) || []
+      // Filter children to only include visible ones
+      const visibleChildren = children.filter(child => visibleManagers.has(child))
+      
+      // Position this manager
+      const x = startX + managerWidth / 2
+      const y = startY + managerBoxHeight / 2
+      positions.set(managerName, { x, y })
+      
+      // If no visible children, return the width needed for just this manager
+      if (visibleChildren.length === 0) {
+        return { x: startX, y: startY, width: managerWidth, height: managerBoxHeight }
+      }
+      
+      // Position visible children below this manager
+      let currentX = startX
+      let maxChildY = startY + managerBoxHeight + verticalGap
+      let totalWidth = 0
+      let maxChildHeight = 0
+      
+      visibleChildren.forEach((childName, idx) => {
+        const childResult = positionManager(childName, currentX, startY + managerBoxHeight + verticalGap, level + 1)
+        currentX += childResult.width + managerGap
+        maxChildY = Math.max(maxChildY, childResult.y + childResult.height / 2)
+        maxChildHeight = Math.max(maxChildHeight, childResult.height)
+        totalWidth += childResult.width + (idx > 0 ? managerGap : 0)
+      })
+      
+      // Center the parent above its children if children take more width
+      const childrenWidth = totalWidth
+      if (childrenWidth > managerWidth) {
+        const newX = startX + (childrenWidth - managerWidth) / 2
+        positions.set(managerName, { x: newX + managerWidth / 2, y })
+      }
+      
+      const totalHeight = managerBoxHeight + verticalGap + maxChildHeight
+      return { x: startX, y: startY, width: Math.max(managerWidth, childrenWidth), height: totalHeight }
+    }
+    
+    // Position visible top-level managers in a row, with their hierarchies below
+    let currentX = padding
+    let currentY = firstBoxTop
+    let maxY = currentY
+    
+    visibleTopLevel.forEach((managerName) => {
+      const result = positionManager(managerName, currentX, currentY, 0)
+      currentX += result.width + managerGap
+      maxY = Math.max(maxY, result.y + result.height / 2 + managerBoxHeight / 2)
+      
+      // If we've exceeded available width, start a new row
+      if (currentX + managerWidth > availableW - padding) {
+        currentX = padding
+        currentY = maxY + managerBoxHeight + verticalGap
+        maxY = currentY
+      }
     })
     
     return positions
-  }, [viewMode, managerList, dims.w, zoom])
+  }, [viewMode, managerHierarchy, dims.w, zoom, visibleManagers])
 
   const layout = useMemo(() => {
     const layoutResult = computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode, showParentBoxes, zoom)
     // Adjust layout to account for manager row if in Architecture Coverage view
     if (viewMode === 'skillGaps' && managerPositions.size > 0) {
-      const managerRowCount = Math.ceil(managerList.length / Math.max(1, Math.floor((Math.max(320, (dims.w / zoom) - 32)) / 165)))
-      const managerRowHeight = 70
+      // Calculate the maximum Y position of all managers to determine total height needed
+      const managerBoxHeight = 35 // Half the height of regular items
       const topGap = 2
-      const rowGap = 2
       const bottomGap = 2
-      const firstBoxTop = topGap
-      // Calculate total height: first box top + all rows + bottom gap
-      const additionalHeight = firstBoxTop + managerRowCount * managerRowHeight + (managerRowCount - 1) * rowGap + bottomGap
+      let maxManagerY = 0
+      managerPositions.forEach((pos) => {
+        maxManagerY = Math.max(maxManagerY, pos.y + managerBoxHeight / 2)
+      })
+      // Calculate total height: top gap + max manager bottom + bottom gap
+      const additionalHeight = topGap + maxManagerY + bottomGap
       return {
         ...layoutResult,
         height: layoutResult.height + additionalHeight,
@@ -574,7 +759,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
       }
     }
     return layoutResult
-  }, [filteredItems, dims, visibleLenses, layoutMode, showParentBoxes, zoom, viewMode, managerPositions, managerList])
+  }, [filteredItems, dims, visibleLenses, layoutMode, showParentBoxes, zoom, viewMode, managerPositions])
 
   function posFor(id?: number) {
     if (!id) return { x: 0, y: 0 }
@@ -731,13 +916,47 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
           )
         })}
         
+        {/* Manager relationship lines (parent to child) - always visible, render before boxes so lines appear behind */}
+        {viewMode === 'skillGaps' && Array.from(managerHierarchy.hierarchy.entries())
+          .filter(([parentName]) => visibleManagers.has(parentName))
+          .map(([parentName, children]) => {
+            const parentPos = managerPositions.get(parentName)
+            if (!parentPos) return null
+            
+            return children
+              .filter(childName => visibleManagers.has(childName))
+              .map(childName => {
+                const childPos = managerPositions.get(childName)
+                if (!childPos) return null
+            
+            const parentColor = managerColors.get(parentName)
+            const lineColor = parentColor?.stroke || "#9ca3af"
+            const managerBoxHeight = 35 // Half the height of regular items
+            
+            const startY = parentPos.y + managerBoxHeight / 2
+            const endY = childPos.y - managerBoxHeight / 2
+            const midX = (parentPos.x + childPos.x) / 2
+            
+            return (
+              <path
+                key={`manager-rel-${parentName}-${childName}`}
+                d={`M ${parentPos.x} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${childPos.x} ${endY}`}
+                fill="none"
+                stroke={lineColor}
+                strokeWidth={2.5}
+                opacity={0.8}
+              />
+            )
+          }).filter(Boolean)
+        })}
+        
         {/* Manager boxes (only in Architecture Coverage view) */}
         {viewMode === 'skillGaps' && Array.from(managerPositions.entries()).map(([managerName, pos]) => {
           const managerColor = managerColors.get(managerName)
           const fillColor = managerColor?.fill || "#e5e7eb"
           const strokeColor = managerColor?.stroke || "#9ca3af"
           const nodeWidth = layout.nodeWidth
-          const nodeHeight = layout.nodeHeight
+          const managerBoxHeight = 35 // Half the height of regular items
           const isSelected = selectedManager === managerName
           const isHovered = hoveredManager === managerName
           const isActive = isSelected || isHovered
@@ -753,9 +972,9 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             >
               <rect
                 x={pos.x - nodeWidth / 2}
-                y={pos.y - nodeHeight / 2}
+                y={pos.y - managerBoxHeight / 2}
                 width={nodeWidth}
-                height={nodeHeight}
+                height={managerBoxHeight}
                 fill={fillColor}
                 stroke={strokeColor}
                 strokeWidth={isActive ? 3 : 2}
@@ -775,7 +994,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
               {(isSelected || isHovered) && (
                 <foreignObject
                   x={pos.x + nodeWidth / 2 - 22}
-                  y={pos.y - nodeHeight / 2 + 2}
+                  y={pos.y - managerBoxHeight / 2 + 2}
                   width={18}
                   height={18}
                 >
@@ -819,7 +1038,8 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             const reportNames = Array.from(allReports)
             const managerColor = managerColors.get(managerName)
             const lineColor = managerColor?.stroke || "#9ca3af"
-            const nodeHeight = layout.nodeHeight
+            const managerBoxHeight = 35 // Half the height of regular items
+            const itemNodeHeight = layout.nodeHeight
             
             return layout.nodes.map(item => {
               // Check if this item is covered by this manager's team
@@ -829,8 +1049,8 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
               if (!isPrimary && !isSecondary) return null
               
               const strokeWidth = isPrimary ? 2 : 1
-              const startY = managerPos.y + nodeHeight / 2
-              const endY = item.y - nodeHeight / 2
+              const startY = managerPos.y + managerBoxHeight / 2
+              const endY = item.y - itemNodeHeight / 2
               const midX = (managerPos.x + item.x) / 2
               
               return (

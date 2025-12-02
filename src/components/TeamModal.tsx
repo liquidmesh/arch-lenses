@@ -528,7 +528,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
   }
 
   // Helper function to render a person box
-  function renderPersonBox(person: PersonCoverage, indentLevel: number = 0) {
+  function renderPersonBox(person: PersonCoverage, indentLevel: number = 0, hideTeamInfo: boolean = false) {
     const indentStyle = indentLevel > 0 ? { marginLeft: `${indentLevel * 24}px` } : {}
     
     return (
@@ -596,7 +596,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
                 No items assigned
               </div>
             )}
-            {person.hasDirectReports && person.teamItems.length > 0 && (
+            {hideTeamInfo === false && person.hasDirectReports && person.teamItems.length > 0 && (
               <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
                 <div className="text-[10px] font-medium mb-0.5">Team:</div>
                 {groupAndSortItems(person.teamItems).map(({ lens, items }) => (
@@ -975,7 +975,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
                     className="flex-shrink-0" 
                     style={{ width: '200px' }}
                   >
-                    {renderPersonBox(node.person, 0)}
+                    {renderPersonBox(node.person, 0, true)}
                   </div>
                 ))}
               </div>

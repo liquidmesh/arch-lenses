@@ -383,12 +383,12 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     return colors
   }
 
-  // Calculate item coverage by manager (find which manager covers this item)
+  // Find which manager covers this item (immediate manager)
   function getItemManagerCoverage(
     item: ItemRecord, 
     teamMembers: TeamMember[]
   ): { manager: string | null; strength: 'primary' | 'secondary' | 'none' } {
-    // Find which manager covers this item
+    // Find all managers
     const allManagers = new Set<string>()
     teamMembers.forEach(member => {
       const isManager = teamMembers.some(m => m.manager === member.name)
@@ -950,6 +950,80 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
           }).filter(Boolean)
         })}
         
+        {/* Relationship lines from managers to items (only in Architecture Coverage view, when manager is hovered/selected OR when item is hovered/selected) - render before manager boxes so lines appear behind */}
+        {viewMode === 'skillGaps' && (() => {
+          const lines: React.ReactElement[] = []
+          const managerBoxHeight = 35 // Half the height of regular items
+          const itemNodeHeight = layout.nodeHeight
+          
+          // Case 1: Manager is hovered/selected - show all lines from that manager to all items it covers
+          if (selectedManager || hoveredManager) {
+            const managerName = selectedManager || hoveredManager
+            const managerPos = managerPositions.get(managerName!)
+            if (managerPos) {
+              const allReports = getAllReports(managerName!, teamMembers)
+              const reportNames = Array.from(allReports)
+              const managerColor = managerColors.get(managerName!)
+              const lineColor = managerColor?.stroke || "#9ca3af"
+              
+              layout.nodes.forEach(item => {
+                // Check if this item is covered by this manager's team
+                const isPrimary = item.primaryArchitect && reportNames.includes(item.primaryArchitect.trim())
+                const isSecondary = item.secondaryArchitects.some(arch => reportNames.includes(arch.trim()))
+                
+                if (!isPrimary && !isSecondary) return
+                
+                const strokeWidth = isPrimary ? 2 : 1
+                const startY = managerPos.y + managerBoxHeight / 2
+                const endY = item.y - itemNodeHeight / 2
+                const midX = (managerPos.x + item.x) / 2
+                
+                lines.push(
+                  <path
+                    key={`manager-line-${managerName}-${item.id}`}
+                    d={`M ${managerPos.x} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${item.x} ${endY}`}
+                    fill="none"
+                    stroke={lineColor}
+                    strokeWidth={strokeWidth}
+                  />
+                )
+              })
+            }
+          }
+          
+          // Case 2: Item is hovered/selected - show only the line from that specific item to its manager
+          if ((hoveredItemId || selectedItemId) && !selectedManager && !hoveredManager) {
+            const activeItemId = selectedItemId || hoveredItemId
+            const activeItem = layout.nodes.find(n => n.id === activeItemId)
+            if (activeItem) {
+              const itemManagerCoverage = getItemManagerCoverage(activeItem, teamMembers)
+              if (itemManagerCoverage.manager) {
+                const managerPos = managerPositions.get(itemManagerCoverage.manager)
+                if (managerPos) {
+                  const managerColor = managerColors.get(itemManagerCoverage.manager)
+                  const lineColor = managerColor?.stroke || "#9ca3af"
+                  const strokeWidth = itemManagerCoverage.strength === 'primary' ? 2 : 1
+                  const startY = managerPos.y + managerBoxHeight / 2
+                  const endY = activeItem.y - itemNodeHeight / 2
+                  const midX = (managerPos.x + activeItem.x) / 2
+                  
+                  lines.push(
+                    <path
+                      key={`manager-line-${itemManagerCoverage.manager}-${activeItem.id}`}
+                      d={`M ${managerPos.x} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${activeItem.x} ${endY}`}
+                      fill="none"
+                      stroke={lineColor}
+                      strokeWidth={strokeWidth}
+                    />
+                  )
+                }
+              }
+            }
+          }
+          
+          return lines
+        })()}
+        
         {/* Manager boxes (only in Architecture Coverage view) */}
         {viewMode === 'skillGaps' && Array.from(managerPositions.entries()).map(([managerName, pos]) => {
           const managerColor = managerColors.get(managerName)
@@ -1025,45 +1099,6 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             </g>
           )
         })}
-        
-        {/* Relationship lines from managers to items (only in Architecture Coverage view, only when manager is hovered or selected) */}
-        {viewMode === 'skillGaps' && Array.from(managerPositions.entries())
-          .filter(([managerName]) => {
-            const isSelected = selectedManager === managerName
-            const isHovered = hoveredManager === managerName
-            return isSelected || isHovered
-          })
-          .map(([managerName, managerPos]) => {
-            const allReports = getAllReports(managerName, teamMembers)
-            const reportNames = Array.from(allReports)
-            const managerColor = managerColors.get(managerName)
-            const lineColor = managerColor?.stroke || "#9ca3af"
-            const managerBoxHeight = 35 // Half the height of regular items
-            const itemNodeHeight = layout.nodeHeight
-            
-            return layout.nodes.map(item => {
-              // Check if this item is covered by this manager's team
-              const isPrimary = item.primaryArchitect && reportNames.includes(item.primaryArchitect.trim())
-              const isSecondary = item.secondaryArchitects.some(arch => reportNames.includes(arch.trim()))
-              
-              if (!isPrimary && !isSecondary) return null
-              
-              const strokeWidth = isPrimary ? 2 : 1
-              const startY = managerPos.y + managerBoxHeight / 2
-              const endY = item.y - itemNodeHeight / 2
-              const midX = (managerPos.x + item.x) / 2
-              
-              return (
-                <path
-                  key={`manager-line-${managerName}-${item.id}`}
-                  d={`M ${managerPos.x} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${item.x} ${endY}`}
-                  fill="none"
-                  stroke={lineColor}
-                  strokeWidth={strokeWidth}
-                />
-              )
-            }).filter(Boolean)
-          })}
         
         {/* Nodes */}
         {layout.nodes.map(n => {
@@ -1161,9 +1196,9 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             // Determine if item is red (skills gap or no coverage)
             const isRed = hasSkillsGap || (!hasPrimaryArchitect && !hasSecondaryArchitects)
             
-            // Get manager coverage for this item
+            // Get the immediate manager for this item (the manager whose team covers it)
             const managerCoverage = getItemManagerCoverage(n, teamMembers)
-            const managerColor = managerCoverage.manager ? managerColors.get(managerCoverage.manager) : null
+            const immediateManagerColor = managerCoverage.manager ? managerColors.get(managerCoverage.manager) : null
             
             // Base colors (used when item is red and has manager coverage)
             let baseFillColor: string
@@ -1176,29 +1211,54 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
               baseFillColor = isActive ? "#bfdbfe" : "#e0f2fe"
             }
             
-            // Apply manager colors if available
-            if (managerColor && managerCoverage.strength !== 'none') {
-              if (isRed) {
-                // Keep red fill, apply manager color to border
-                fillColor = baseFillColor
-                strokeColor = managerColor.stroke
-              } else {
-                // Apply manager colors to both fill and stroke
-                fillColor = managerColor.fill
-                strokeColor = managerColor.stroke
-              }
+            // Check if a manager is selected or hovered
+            const activeManager = selectedManager || hoveredManager
+            
+            if (activeManager) {
+              // Manager is selected/hovered - check if this item is related to that manager
+              const allReports = getAllReports(activeManager, teamMembers)
+              const reportNames = Array.from(allReports)
               
-              // Set border thickness based on coverage strength
-              if (managerCoverage.strength === 'primary') {
-                strokeWidth = isHovered || isSelected ? 4 : (isRelated ? 3 : 3)
-              } else if (managerCoverage.strength === 'secondary') {
-                strokeWidth = isHovered || isSelected ? 3 : (isRelated ? 2 : 2)
-              } else {
+              // Check if item is covered by the active manager's team
+              const isRelatedToActive = (n.primaryArchitect && reportNames.includes(n.primaryArchitect.trim())) ||
+                                       n.secondaryArchitects.some(arch => reportNames.includes(arch.trim()))
+              
+              if (!isRelatedToActive) {
+                // Item is not related to the active manager - make grey
+                fillColor = isActive ? "#e5e7eb" : "#f3f4f6"
+                strokeColor = isActive ? "#9ca3af" : "#d1d5db"
                 strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
+              } else {
+                // Item is related to the active manager - show its immediate manager colors
+                if (immediateManagerColor && managerCoverage.strength !== 'none') {
+                  if (isRed) {
+                    // Keep red fill, apply immediate manager color to border
+                    fillColor = baseFillColor
+                    strokeColor = immediateManagerColor.stroke
+                  } else {
+                    // Apply immediate manager colors to both fill and stroke
+                    fillColor = immediateManagerColor.fill
+                    strokeColor = immediateManagerColor.stroke
+                  }
+                  
+                  // Set border thickness based on coverage strength
+                  if (managerCoverage.strength === 'primary') {
+                    strokeWidth = isHovered || isSelected ? 4 : (isRelated ? 3 : 3)
+                  } else if (managerCoverage.strength === 'secondary') {
+                    strokeWidth = isHovered || isSelected ? 3 : (isRelated ? 2 : 2)
+                  } else {
+                    strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
+                  }
+                } else {
+                  // No immediate manager coverage, use base colors
+                  fillColor = baseFillColor
+                  strokeColor = isActive ? "#9ca3af" : "#d1d5db"
+                  strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
+                }
               }
             } else {
-              // No manager coverage, make grey
-              fillColor = isActive ? "#e5e7eb" : "#f3f4f6"
+              // No manager selected/hovered - use default colors based on skills gaps (no manager colors)
+              fillColor = baseFillColor
               strokeColor = isActive ? "#9ca3af" : "#d1d5db"
               strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
             }

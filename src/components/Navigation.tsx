@@ -1,4 +1,4 @@
-type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'manage-lenses'
+type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'manage-lenses' | 'tasks' | 'divest-replacement'
 
 interface NavigationProps {
   currentView: ViewType
@@ -12,6 +12,8 @@ export function Navigation({ currentView, onNavigate }: NavigationProps) {
     { id: 'architects' as const, label: 'People' },
     { id: 'manage-team' as const, label: 'Manage Team' },
     { id: 'meeting-notes' as const, label: 'Notes' },
+    { id: 'tasks' as const, label: 'Tasks' },
+    { id: 'divest-replacement' as const, label: 'Target View' },
     { id: 'manage-lenses' as const, label: 'Manage Lenses' },
   ]
 

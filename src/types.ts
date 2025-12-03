@@ -52,6 +52,7 @@ export interface ItemRecord {
   skillsGaps?: string;
   parent?: string; // Used to group lens items together for display
   hyperlinks?: Hyperlink[]; // List of hyperlinks to related webpages
+  architectureManager?: string; // Manager who owns this architecture lens item
   createdAt: number;
   updatedAt: number;
 }

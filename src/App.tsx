@@ -10,11 +10,13 @@ import { TeamModal } from './components/TeamModal'
 import { TeamManager } from './components/TeamManager'
 import { MeetingNotesModal } from './components/MeetingNotesModal'
 import { LensManager } from './components/LensManager'
+import { TasksModal } from './components/TasksModal'
+import { DivestReplacementView } from './components/DivestReplacementView'
 import { invalidateLensesCache, getLensOrderSync } from './utils/lensOrder'
 import { getAllLenses } from './db'
 import { Modal } from './components/Modal'
 
-type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'manage-lenses'
+type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'manage-lenses' | 'tasks' | 'divest-replacement'
 
 function App() {
   const [lenses, setLenses] = useState<LensDefinition[]>(LENSES)
@@ -410,6 +412,22 @@ function App() {
         )}
         {currentView === 'manage-lenses' && (
           <LensManager onNavigate={handleNavigate} />
+        )}
+        {currentView === 'tasks' && (
+          <TasksModal
+            onEditPerson={(personName) => {
+              setTeamManagerPersonName(personName)
+              handleNavigate('manage-team')
+            }}
+            onOpenMeetingNote={(noteId) => {
+              setMeetingNoteToOpen(noteId)
+              handleNavigate('meeting-notes')
+            }}
+            onNavigate={handleNavigate}
+          />
+        )}
+        {currentView === 'divest-replacement' && (
+          <DivestReplacementView onNavigate={handleNavigate} />
         )}
       </div>
       <Modal

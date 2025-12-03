@@ -26,6 +26,7 @@ interface PersonCoverage {
   hasPrimary: boolean
   teamItems: Array<{ item: ItemRecord; lens: string }>
   hasDirectReports: boolean
+  architectureManagerItems: Array<{ item: ItemRecord; lens: string }>
 }
 
 type CoverageGroup = 'high' | 'medium' | 'low' | 'none' | 'all'
@@ -135,6 +136,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
           hasPrimary: false,
           teamItems: [],
           hasDirectReports: false,
+          architectureManagerItems: [],
         })
       }
     })
@@ -174,6 +176,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
             hasPrimary: false,
             teamItems: [],
             hasDirectReports: false,
+            architectureManagerItems: [],
           })
         }
         const person = coverage.get(name)!
@@ -202,6 +205,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
             hasPrimary: false,
             teamItems: [],
             hasDirectReports: false,
+            architectureManagerItems: [],
           })
         }
         const person = coverage.get(name)!
@@ -228,6 +232,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
             hasPrimary: false,
             teamItems: [],
             hasDirectReports: false,
+            architectureManagerItems: [],
           })
         }
         const person = coverage.get(name)!
@@ -254,6 +259,7 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
             hasPrimary: false,
             teamItems: [],
             hasDirectReports: false,
+            architectureManagerItems: [],
           })
         }
         const person = coverage.get(name)!
@@ -292,6 +298,18 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
             }
           })
         }
+        
+        // Collect architecture manager items (items where this person is the Architecture Manager)
+        const architectureManagerItemSet = new Set<number>() // Use Set to avoid duplicates
+        visibleItems.forEach(item => {
+          if (item.architectureManager && item.architectureManager.trim().toLowerCase() === person.name.toLowerCase()) {
+            const lensLabel = LENSES.find(l => l.key === item.lens)?.label || item.lens
+            if (item.id && !architectureManagerItemSet.has(item.id)) {
+              architectureManagerItemSet.add(item.id)
+              person.architectureManagerItems.push({ item, lens: lensLabel })
+            }
+          }
+        })
       } else {
         person.totalCoverage = person.businessContactCount + person.techContactCount
       }
@@ -600,6 +618,21 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
               <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
                 <div className="text-[10px] font-medium mb-0.5">Team:</div>
                 {groupAndSortItems(person.teamItems).map(({ lens, items }) => (
+                  <div key={lens} className="mb-0.5">
+                    <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                    {items.map(({ item }, idx) => (
+                      <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                        • {item.name}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+            {person.architectureManagerItems.length > 0 && (
+              <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+                <div className="text-[10px] font-medium mb-0.5">Architecture Manager:</div>
+                {groupAndSortItems(person.architectureManagerItems).map(({ lens, items }) => (
                   <div key={lens} className="mb-0.5">
                     <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
                     {items.map(({ item }, idx) => (
@@ -1137,6 +1170,21 @@ export function TeamModal({ onEditPerson, refreshKey, onOpenMeetingNote, onNavig
                               <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
                                 <div className="text-[10px] font-medium mb-0.5">Team:</div>
                                 {groupAndSortItems(person.teamItems).map(({ lens, items }) => (
+                                  <div key={lens} className="mb-0.5">
+                                    <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
+                                    {items.map(({ item }, idx) => (
+                                      <div key={idx} className="text-[10px] text-slate-600 dark:text-slate-400 leading-tight ml-2">
+                                        • {item.name}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {person.architectureManagerItems.length > 0 && (
+                              <div className="mt-1.5 pt-1.5 border-t border-slate-300 dark:border-slate-700">
+                                <div className="text-[10px] font-medium mb-0.5">Architecture Manager:</div>
+                                {groupAndSortItems(person.architectureManagerItems).map(({ lens, items }) => (
                                   <div key={lens} className="mb-0.5">
                                     <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">{lens}:</div>
                                     {items.map(({ item }, idx) => (

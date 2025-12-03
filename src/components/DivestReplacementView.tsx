@@ -131,6 +131,13 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
         )
       })
 
+      // Create a map of item ID to relationship lifecycle status
+      const itemRelLifecycleMap = new Map<number, LifecycleStatus | undefined>()
+      relatedRels.forEach(rel => {
+        const itemId = rel.fromItemId === primaryItem.id ? rel.toItemId : rel.fromItemId
+        itemRelLifecycleMap.set(itemId, rel.lifecycleStatus)
+      })
+
       // Get the related items from secondary lens
       const relatedItemIds = new Set<number>()
       relatedRels.forEach(rel => {
@@ -145,30 +152,67 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
         item.lens === secondaryLens && relatedItemIds.has(item.id!)
       )
 
-      // Categorize by lifecycle status
+      // Categorize by lifecycle status, considering both item lifecycle and relationship lifecycle
       // Items with no status should appear in both Current and Target
       const itemsWithNoStatus = relatedItems.filter(item => !item.lifecycleStatus)
-      const divestItems = relatedItems.filter(item => item.lifecycleStatus === 'Divest')
-      // Include items with no status in divestItems for Current column
-      const divestItemsWithNoStatus = [...divestItems, ...itemsWithNoStatus]
       
-      const replacementItems = relatedItems.filter(item => 
-        item.lifecycleStatus === 'Emerging' || 
-        item.lifecycleStatus === 'Invest' || 
-        item.lifecycleStatus === 'Plan' ||
-        item.lifecycleStatus === 'Stable'
-      )
+      // Filter items based on relationship lifecycle:
+      // - Items with relationship lifecycle "Divest" should not appear in Target column
+      // - Items with relationship lifecycle "Plan" should not appear in Current column
+      const divestItems = relatedItems.filter(item => {
+        const itemId = item.id!
+        const relLifecycle = itemRelLifecycleMap.get(itemId)
+        // Exclude if relationship lifecycle is "Plan" (shouldn't be in Current)
+        if (relLifecycle === 'Plan') return false
+        return item.lifecycleStatus === 'Divest'
+      })
+      // Include items with no status in divestItems for Current column (unless relationship is "Plan")
+      const divestItemsWithNoStatus = [
+        ...divestItems,
+        ...itemsWithNoStatus.filter(item => {
+          const itemId = item.id!
+          const relLifecycle = itemRelLifecycleMap.get(itemId)
+          return relLifecycle !== 'Plan'
+        })
+      ]
+      
+      const replacementItems = relatedItems.filter(item => {
+        const itemId = item.id!
+        const relLifecycle = itemRelLifecycleMap.get(itemId)
+        // Exclude if relationship lifecycle is "Divest" (shouldn't be in Target)
+        if (relLifecycle === 'Divest') return false
+        return (
+          item.lifecycleStatus === 'Emerging' || 
+          item.lifecycleStatus === 'Invest' || 
+          item.lifecycleStatus === 'Plan' ||
+          item.lifecycleStatus === 'Stable'
+        )
+      })
       // Items with other statuses (excluding Divest and the ones already categorized)
-      const otherItems = relatedItems.filter(item => 
-        item.lifecycleStatus &&
-        item.lifecycleStatus !== 'Divest' &&
-        item.lifecycleStatus !== 'Emerging' &&
-        item.lifecycleStatus !== 'Invest' &&
-        item.lifecycleStatus !== 'Plan' &&
-        item.lifecycleStatus !== 'Stable'
-      )
-      // Include items with no status in targetItems for Target column
-      const targetItemsWithNoStatus = [...replacementItems, ...otherItems, ...itemsWithNoStatus]
+      const otherItems = relatedItems.filter(item => {
+        const itemId = item.id!
+        const relLifecycle = itemRelLifecycleMap.get(itemId)
+        // Exclude if relationship lifecycle is "Divest" (shouldn't be in Target)
+        if (relLifecycle === 'Divest') return false
+        return (
+          item.lifecycleStatus &&
+          item.lifecycleStatus !== 'Divest' &&
+          item.lifecycleStatus !== 'Emerging' &&
+          item.lifecycleStatus !== 'Invest' &&
+          item.lifecycleStatus !== 'Plan' &&
+          item.lifecycleStatus !== 'Stable'
+        )
+      })
+      // Include items with no status in targetItems for Target column (unless relationship is "Divest")
+      const targetItemsWithNoStatus = [
+        ...replacementItems,
+        ...otherItems,
+        ...itemsWithNoStatus.filter(item => {
+          const itemId = item.id!
+          const relLifecycle = itemRelLifecycleMap.get(itemId)
+          return relLifecycle !== 'Divest'
+        })
+      ]
 
       return {
         primaryItem,

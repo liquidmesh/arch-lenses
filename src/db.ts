@@ -125,6 +125,15 @@ class ArchLensesDB extends Dexie {
       tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
       lenses: '++id, key, order, updatedAt',
     })
+    // Version 13: Add lifecycleStatus field to relationships (no schema change needed, just version bump)
+    this.version(13).stores({
+      items: '++id, &[lens+name], lens, name, updatedAt',
+      relationships: '++id, fromLens, fromItemId, toLens, toItemId',
+      teamMembers: '++id, name, manager, team, updatedAt',
+      meetingNotes: '++id, dateTime, createdAt, updatedAt',
+      tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
+      lenses: '++id, key, order, updatedAt',
+    })
   }
 }
 

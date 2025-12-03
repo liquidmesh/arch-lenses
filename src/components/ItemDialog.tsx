@@ -212,11 +212,11 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
     // prevent duplicates both directions
     const existing = await db.relationships.where({ fromItemId: item.id, toItemId }).first()
     if (!existing) {
-      await db.relationships.add({ fromLens: lens, fromItemId: item.id, toLens, toItemId, createdAt: now })
+      await db.relationships.add({ fromLens: lens, fromItemId: item.id, toLens, toItemId, lifecycleStatus: undefined, createdAt: now })
     }
     const reverseExisting = await db.relationships.where({ fromItemId: toItemId, toItemId: item.id }).first()
     if (!reverseExisting) {
-      await db.relationships.add({ fromLens: toLens, fromItemId: toItemId, toLens: lens, toItemId: item.id, createdAt: now })
+      await db.relationships.add({ fromLens: toLens, fromItemId: toItemId, toLens: lens, toItemId: item.id, lifecycleStatus: undefined, createdAt: now })
     }
     const updated = await db.relationships.where({ fromItemId: item.id }).toArray()
     setRels(updated)
@@ -483,15 +483,44 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
       {!isNew && (
         <div className="mt-6">
           <h4 className="font-medium mb-2">Relationships</h4>
-          <div className="flex flex-wrap gap-2 mb-3">
+          <div className="space-y-2 mb-3">
             {rels.length === 0 && <span className="text-slate-500 text-sm">No relationships</span>}
             {rels.map(r => {
               const relatedItem = relatedItems.get(r.toItemId)
               return (
-                <span key={r.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-100 dark:bg-slate-800">
-                  {lensLabel(r.toLens)}: {relatedItem?.name || `#${r.toItemId}`}
-                  <button className="ml-1" onClick={() => removeRelationship(r.id)}>×</button>
-                </span>
+                <div key={r.id} className="flex items-center gap-2 p-2 border border-slate-200 dark:border-slate-800 rounded">
+                  <span className="flex-1 text-sm">
+                    {lensLabel(r.toLens)}: {relatedItem?.name || `#${r.toItemId}`}
+                  </span>
+                  <select
+                    value={r.lifecycleStatus || ''}
+                    onChange={async (e) => {
+                      const newStatus = e.target.value || undefined
+                      if (r.id) {
+                        await db.relationships.update(r.id, { lifecycleStatus: newStatus as LifecycleStatus | undefined })
+                        // Update reverse relationship if it exists
+                        const reverse = await db.relationships.where({ fromItemId: r.toItemId, toItemId: r.fromItemId }).first()
+                        if (reverse?.id) {
+                          await db.relationships.update(reverse.id, { lifecycleStatus: newStatus as LifecycleStatus | undefined })
+                        }
+                        // Reload relationships
+                        if (item?.id) {
+                          const updated = await db.relationships.where({ fromItemId: item.id }).toArray()
+                          setRels(updated)
+                        }
+                      }
+                    }}
+                    className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  >
+                    <option value="">(None)</option>
+                    <option value="Plan">Plan</option>
+                    <option value="Emerging">Emerging</option>
+                    <option value="Invest">Invest</option>
+                    <option value="Divest">Divest</option>
+                    <option value="Stable">Stable</option>
+                  </select>
+                  <button className="px-2 py-1 text-xs rounded border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => removeRelationship(r.id)}>Remove</button>
+                </div>
               )
             })}
           </div>

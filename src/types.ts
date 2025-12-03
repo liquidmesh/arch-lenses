@@ -63,6 +63,7 @@ export interface RelationshipRecord {
   fromItemId: number;
   toLens: LensKey;
   toItemId: number;
+  lifecycleStatus?: LifecycleStatus; // Optional lifecycle status for the relationship
   createdAt: number;
 }
 

@@ -42,6 +42,10 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     const saved = localStorage.getItem('graph-show-parent-boxes')
     return saved === 'true'
   })
+  const [showRelationshipLines, setShowRelationshipLines] = useState(() => {
+    const saved = localStorage.getItem('graph-show-relationship-lines')
+    return saved !== 'false' // Default to true
+  })
   
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editItem, setEditItem] = useState<ItemRecord | null>(null)
@@ -75,6 +79,11 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   useEffect(() => {
     localStorage.setItem('graph-layout-mode', layoutMode)
   }, [layoutMode])
+
+  // Persist show relationship lines to localStorage
+  useEffect(() => {
+    localStorage.setItem('graph-show-relationship-lines', String(showRelationshipLines))
+  }, [showRelationshipLines])
 
   // Persist view mode to localStorage
   useEffect(() => {
@@ -841,6 +850,12 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
                 <input type="checkbox" checked={showParentBoxes} onChange={e => setShowParentBoxes(e.target.checked)} />
                 Show parent boxes
               </label>
+              {(filterToRelated && selectedItemId) || (filterToManager && selectedManagerForFilter) ? (
+                <label className="flex items-center gap-1 text-xs">
+                  <input type="checkbox" checked={showRelationshipLines} onChange={e => setShowRelationshipLines(e.target.checked)} />
+                  Show relationship lines
+                </label>
+              ) : null}
               <div className="flex items-center gap-1 border-l border-slate-300 dark:border-slate-700 pl-2">
                 <button onClick={() => setZoom(z => Math.max(0.25, z - 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">−</button>
                 <span className="text-xs min-w-[3rem] text-center">{Math.round(zoom * 100)}%</span>
@@ -908,7 +923,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
           </g>
         ))}
         {/* Links */}
-        {visibleRels.map((r, i) => {
+        {((filterToRelated && selectedItemId) ? showRelationshipLines : true) && visibleRels.map((r, i) => {
           const a = posFor(r.fromItemId)
           const b = posFor(r.toItemId)
           const midX = (a.x + b.x) / 2
@@ -953,6 +968,13 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
         
         {/* Relationship lines from managers to items (only in Architecture Coverage view, when manager is hovered/selected OR when item is hovered/selected) - render before manager boxes so lines appear behind */}
         {(viewMode === 'skillGaps' || viewMode === 'architectureManager') && (() => {
+          // Check if we should show manager-to-item lines based on filter state and toggle
+          const shouldShowManagerLines = (filterToManager && selectedManagerForFilter) 
+            ? showRelationshipLines 
+            : true // Always show when just hovering (not filtered)
+          
+          if (!shouldShowManagerLines) return []
+          
           const lines: React.ReactElement[] = []
           const managerBoxHeight = 35 // Half the height of regular items
           const itemNodeHeight = layout.nodeHeight

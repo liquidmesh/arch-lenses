@@ -427,25 +427,25 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               </div>
               
               {/* Rows grouped by parent */}
-              <div className="space-y-1">
+              <div className="space-y-2">
                 {sortedParents.map(parent => {
                   const groupItems = groupedItemAnalysis.get(parent)!
                   return (
-                    <div key={parent || 'no-parent'} className="space-y-1">
+                    <div key={parent || 'no-parent'}>
                       {/* Parent group header */}
                       {parent && (
                         <div className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-0.5">
                           {parent}
                         </div>
                       )}
-                      {/* Items in this parent group */}
-                      {groupItems.map(({ primaryItem, divestItems, targetItems }) => {
-                        return (
-                          <div
-                            key={primaryItem.id}
-                            className="bg-white dark:bg-slate-800 rounded border border-slate-300 dark:border-slate-700 p-2"
-                          >
-                            <div className="grid grid-cols-[200px_1fr_1fr] gap-3">
+                      {/* Items in this parent group - continuous table */}
+                      <div className="bg-white dark:bg-slate-800 rounded border border-slate-300 dark:border-slate-700 overflow-hidden">
+                        {groupItems.map(({ primaryItem, divestItems, targetItems }, idx) => {
+                          return (
+                            <div
+                              key={primaryItem.id}
+                              className={`grid grid-cols-[200px_1fr_1fr] gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
+                            >
                               {/* Left: Primary Item Name */}
                               <div className="flex flex-col justify-start">
                                 <div 
@@ -536,9 +536,9 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                 )}
                               </div>
                             </div>
-                          </div>
-                        )
-                      })}
+                          )
+                        })}
+                      </div>
                     </div>
                   )
                 })}

@@ -277,6 +277,36 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
 
   const selectedFilterItem = filterItemId ? items.find(item => item.id === filterItemId) : null
 
+  // Group itemAnalysis by primary item parent
+  const groupedItemAnalysis = useMemo(() => {
+    if (!itemAnalysis.length) return new Map<string | null, typeof itemAnalysis>()
+    
+    const grouped = new Map<string | null, typeof itemAnalysis>()
+    itemAnalysis.forEach(analysis => {
+      const parent = analysis.primaryItem.parent || null
+      if (!grouped.has(parent)) {
+        grouped.set(parent, [])
+      }
+      grouped.get(parent)!.push(analysis)
+    })
+    
+    // Sort items within each group by name
+    grouped.forEach((groupItems) => {
+      groupItems.sort((a, b) => a.primaryItem.name.localeCompare(b.primaryItem.name))
+    })
+    
+    return grouped
+  }, [itemAnalysis])
+
+  // Sort parent groups (null first, then alphabetically)
+  const sortedParents = useMemo(() => {
+    return Array.from(groupedItemAnalysis.keys()).sort((a, b) => {
+      if (a === null) return -1
+      if (b === null) return 1
+      return a.localeCompare(b)
+    })
+  }, [groupedItemAnalysis])
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
       <div className="flex items-center gap-4 p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
@@ -396,105 +426,119 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 </div>
               </div>
               
-              {/* Rows */}
-              <div className="space-y-2">
-                {itemAnalysis.map(({ primaryItem, divestItems, targetItems }) => {
+              {/* Rows grouped by parent */}
+              <div className="space-y-1">
+                {sortedParents.map(parent => {
+                  const groupItems = groupedItemAnalysis.get(parent)!
                   return (
-                    <div
-                      key={primaryItem.id}
-                      className="bg-white dark:bg-slate-800 rounded border border-slate-300 dark:border-slate-700 p-2"
-                    >
-                      <div className="grid grid-cols-[200px_1fr_1fr] gap-3">
-                        {/* Left: Primary Item Name */}
-                        <div className="flex flex-col justify-start">
-                          <div 
-                            className="font-bold text-sm text-slate-800 dark:text-slate-200 cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
-                            onClick={() => {
-                              setEditItem(primaryItem)
-                              setEditDialogOpen(true)
-                            }}
+                    <div key={parent || 'no-parent'} className="space-y-1">
+                      {/* Parent group header */}
+                      {parent && (
+                        <div className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-0.5">
+                          {parent}
+                        </div>
+                      )}
+                      {/* Items in this parent group */}
+                      {groupItems.map(({ primaryItem, divestItems, targetItems }) => {
+                        return (
+                          <div
+                            key={primaryItem.id}
+                            className="bg-white dark:bg-slate-800 rounded border border-slate-300 dark:border-slate-700 p-2"
                           >
-                            {primaryItem.name}
+                            <div className="grid grid-cols-[200px_1fr_1fr] gap-3">
+                              {/* Left: Primary Item Name */}
+                              <div className="flex flex-col justify-start">
+                                <div 
+                                  className="font-bold text-sm text-slate-800 dark:text-slate-200 cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                                  onClick={() => {
+                                    setEditItem(primaryItem)
+                                    setEditDialogOpen(true)
+                                  }}
+                                >
+                                  {primaryItem.name}
+                                </div>
+                                {minorTextOption !== 'none' && primaryItem.description && (
+                                  <div className="text-xs text-slate-600 dark:text-slate-400 mt-1 line-clamp-2">
+                                    {primaryItem.description}
+                                  </div>
+                                )}
+                              </div>
+                              
+                              {/* Middle Column: Current (Invest items with relationship lifecycle None or Divest) */}
+                              <div>
+                                {divestItems.length > 0 ? (
+                                  <div className="grid grid-cols-3 gap-1">
+                                    {divestItems.map(item => (
+                                      <div
+                                        key={item.id}
+                                        className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                        onClick={() => {
+                                          setEditItem(item)
+                                          setEditDialogOpen(true)
+                                        }}
+                                      >
+                                        <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                          {item.name}
+                                        </div>
+                                        {minorTextOption === 'description' && item.description && (
+                                          <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                            {item.description}
+                                          </div>
+                                        )}
+                                        {minorTextOption === 'lifecycle' && (
+                                          <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                            {getLifecycleLabel(item.lifecycleStatus)}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                    No items in Current column
+                                  </div>
+                                )}
+                              </div>
+                              
+                              {/* Right Column: Target (Replacement Items + Other Items + No Status) */}
+                              <div className="ml-12">
+                                {targetItems.length > 0 ? (
+                                  <div className="grid grid-cols-3 gap-1">
+                                    {targetItems.map(item => (
+                                      <div
+                                        key={item.id}
+                                        className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                        onClick={() => {
+                                          setEditItem(item)
+                                          setEditDialogOpen(true)
+                                        }}
+                                      >
+                                        <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                          {item.name}
+                                        </div>
+                                        {minorTextOption === 'description' && item.description && (
+                                          <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                            {item.description}
+                                          </div>
+                                        )}
+                                        {minorTextOption === 'lifecycle' && (
+                                          <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                            {getLifecycleLabel(item.lifecycleStatus)}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                    No replacement items
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                          {minorTextOption !== 'none' && primaryItem.description && (
-                            <div className="text-xs text-slate-600 dark:text-slate-400 mt-1 line-clamp-2">
-                              {primaryItem.description}
-                            </div>
-                          )}
-                        </div>
-                        
-                        {/* Middle Column: Current (Invest items with relationship lifecycle None or Divest) */}
-                        <div>
-                          {divestItems.length > 0 ? (
-                            <div className="grid grid-cols-3 gap-1">
-                              {divestItems.map(item => (
-                                <div
-                                  key={item.id}
-                                  className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
-                                  onClick={() => {
-                                    setEditItem(item)
-                                    setEditDialogOpen(true)
-                                  }}
-                                >
-                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                    {item.name}
-                                  </div>
-                                  {minorTextOption === 'description' && item.description && (
-                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                      {item.description}
-                                    </div>
-                                  )}
-                                  {minorTextOption === 'lifecycle' && (
-                                    <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                      {getLifecycleLabel(item.lifecycleStatus)}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
-                              No items in Current column
-                            </div>
-                          )}
-                        </div>
-                        
-                        {/* Right Column: Target (Replacement Items + Other Items + No Status) */}
-                        <div className="ml-12">
-                          {targetItems.length > 0 ? (
-                            <div className="grid grid-cols-3 gap-1">
-                              {targetItems.map(item => (
-                                <div
-                                  key={item.id}
-                                  className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
-                                  onClick={() => {
-                                    setEditItem(item)
-                                    setEditDialogOpen(true)
-                                  }}
-                                >
-                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                    {item.name}
-                                  </div>
-                                  {minorTextOption === 'description' && item.description && (
-                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                      {item.description}
-                                    </div>
-                                  )}
-                                  {minorTextOption === 'lifecycle' && (
-                                    <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                      {getLifecycleLabel(item.lifecycleStatus)}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
-                              No replacement items
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                        )
+                      })}
                     </div>
                   )
                 })}

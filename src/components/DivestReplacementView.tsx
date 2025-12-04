@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db, getAllLenses } from '../db'
 import { type ItemRecord, type RelationshipRecord, type LensKey, type LifecycleStatus, LENSES } from '../types'
+import { ItemDialog } from './ItemDialog'
 
 type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'manage-lenses' | 'tasks' | 'divest-replacement'
 
@@ -29,6 +30,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     const saved = localStorage.getItem('divest-replacement-minor-text')
     return (saved === 'none' || saved === 'lifecycle' || saved === 'description') ? saved : 'lifecycle'
   })
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editItem, setEditItem] = useState<ItemRecord | null>(null)
 
   useEffect(() => {
     loadData()
@@ -156,25 +159,41 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       // Items with no status should appear in both Current and Target
       const itemsWithNoStatus = relatedItems.filter(item => !item.lifecycleStatus)
       
+      // Current column: 
+      // 1. Items with lifecycle "Invest" AND relationship with no lifecycle or lifecycle "Divest"
+      // 2. Items with lifecycle "Divest"
+      // 3. Items with lifecycle "Stable"
+      // 4. Items with no lifecycle status (unless relationship is "Plan")
+      const currentItems = relatedItems.filter(item => {
+        const itemId = item.id!
+        const relLifecycle = itemRelLifecycleMap.get(itemId)
+        
+        // Rule 1: Items with lifecycle "Invest" AND relationship with no lifecycle or lifecycle "Divest"
+        if (item.lifecycleStatus === 'Invest') {
+          return relLifecycle === undefined || relLifecycle === 'Divest'
+        }
+        
+        // Rule 2: Items with lifecycle "Divest"
+        if (item.lifecycleStatus === 'Divest') {
+          return true
+        }
+        
+        // Rule 3: Items with lifecycle "Stable"
+        if (item.lifecycleStatus === 'Stable') {
+          return true
+        }
+        
+        // Rule 4: Items with no lifecycle status (unless relationship is "Plan")
+        if (!item.lifecycleStatus) {
+          return relLifecycle !== 'Plan'
+        }
+        
+        return false
+      })
+      
       // Filter items based on relationship lifecycle:
       // - Items with relationship lifecycle "Divest" should not appear in Target column
       // - Items with relationship lifecycle "Plan" should not appear in Current column
-      const divestItems = relatedItems.filter(item => {
-        const itemId = item.id!
-        const relLifecycle = itemRelLifecycleMap.get(itemId)
-        // Exclude if relationship lifecycle is "Plan" (shouldn't be in Current)
-        if (relLifecycle === 'Plan') return false
-        return item.lifecycleStatus === 'Divest'
-      })
-      // Include items with no status in divestItems for Current column (unless relationship is "Plan")
-      const divestItemsWithNoStatus = [
-        ...divestItems,
-        ...itemsWithNoStatus.filter(item => {
-          const itemId = item.id!
-          const relLifecycle = itemRelLifecycleMap.get(itemId)
-          return relLifecycle !== 'Plan'
-        })
-      ]
       
       const replacementItems = relatedItems.filter(item => {
         const itemId = item.id!
@@ -216,7 +235,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
 
       return {
         primaryItem,
-        divestItems: divestItemsWithNoStatus,
+        divestItems: currentItems, // Current column items
         replacementItems,
         otherItems,
         targetItems: targetItemsWithNoStatus,
@@ -388,26 +407,36 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                       <div className="grid grid-cols-[200px_1fr_1fr] gap-3">
                         {/* Left: Primary Item Name */}
                         <div className="flex flex-col justify-start">
-                          <div className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                          <div 
+                            className="font-bold text-sm text-slate-800 dark:text-slate-200 cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                            onClick={() => {
+                              setEditItem(primaryItem)
+                              setEditDialogOpen(true)
+                            }}
+                          >
                             {primaryItem.name}
                           </div>
-                          {primaryItem.description && (
+                          {minorTextOption !== 'none' && primaryItem.description && (
                             <div className="text-xs text-slate-600 dark:text-slate-400 mt-1 line-clamp-2">
                               {primaryItem.description}
                             </div>
                           )}
                         </div>
                         
-                        {/* Middle Column: Current (Divest Items + No Status) */}
+                        {/* Middle Column: Current (Invest items with relationship lifecycle None or Divest) */}
                         <div>
                           {divestItems.length > 0 ? (
                             <div className="grid grid-cols-3 gap-1">
                               {divestItems.map(item => (
                                 <div
                                   key={item.id}
-                                  className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)}`}
+                                  className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                  onClick={() => {
+                                    setEditItem(item)
+                                    setEditDialogOpen(true)
+                                  }}
                                 >
-                                  <div className="text-xs text-slate-800 dark:text-slate-200">
+                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
                                     {item.name}
                                   </div>
                                   {minorTextOption === 'description' && item.description && (
@@ -425,7 +454,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                             </div>
                           ) : (
                             <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
-                              No items in Divest status
+                              No items in Current column
                             </div>
                           )}
                         </div>
@@ -437,9 +466,13 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                               {targetItems.map(item => (
                                 <div
                                   key={item.id}
-                                  className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)}`}
+                                  className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                  onClick={() => {
+                                    setEditItem(item)
+                                    setEditDialogOpen(true)
+                                  }}
                                 >
-                                  <div className="text-xs text-slate-800 dark:text-slate-200">
+                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
                                     {item.name}
                                   </div>
                                   {minorTextOption === 'description' && item.description && (
@@ -479,6 +512,26 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           </div>
         )}
       </div>
+      <ItemDialog
+        open={editDialogOpen}
+        onClose={() => {
+          setEditDialogOpen(false)
+          setEditItem(null)
+        }}
+        lens={editItem?.lens || ''}
+        item={editItem}
+        onSaved={async () => {
+          // Reload items and relationships after save
+          const [allItems, allRels] = await Promise.all([
+            db.items.toArray(),
+            db.relationships.toArray(),
+          ])
+          setItems(allItems)
+          setRelationships(allRels)
+          setEditDialogOpen(false)
+          setEditItem(null)
+        }}
+      />
     </div>
   )
 }

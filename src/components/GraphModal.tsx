@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { db, getAllLenses } from '../db'
 import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type LensDefinition, type Task, type TeamMember } from '../types'
 import { ItemDialog } from './ItemDialog'
@@ -56,6 +56,8 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   const [lenses, setLenses] = useState<LensDefinition[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
+  
+  const svgRef = useRef<SVGSVGElement>(null)
 
   // Load lenses from database
   useEffect(() => {
@@ -816,6 +818,494 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     }
   }
 
+  // Export as SVG
+  function handleExportSVG() {
+    if (!svgRef.current) return
+    
+    // Clone the SVG to avoid modifying the original
+    const svgClone = svgRef.current.cloneNode(true) as SVGSVGElement
+    
+    // Remove transform style and apply it to the SVG dimensions instead
+    const currentTransform = svgRef.current.style.transform
+    const scaleMatch = currentTransform.match(/scale\(([^)]+)\)/)
+    const scale = scaleMatch ? parseFloat(scaleMatch[1]) : 1
+    
+    // Set explicit dimensions accounting for zoom
+    svgClone.setAttribute('width', String(layout.width * scale))
+    svgClone.setAttribute('height', String(layout.height * scale))
+    svgClone.style.transform = ''
+    svgClone.style.transformOrigin = ''
+    
+    // Add font-family to all text elements to match web display
+    const fontFamily = 'system-ui, -apple-system, sans-serif'
+    const textElements = svgClone.querySelectorAll('text')
+    textElements.forEach(textEl => {
+      const currentStyle = textEl.getAttribute('style') || ''
+      // Check if font-family is already set
+      if (!currentStyle.includes('font-family')) {
+        textEl.setAttribute('style', `${currentStyle ? currentStyle + '; ' : ''}font-family: ${fontFamily}`)
+      }
+    })
+    
+    // Serialize to string
+    const serializer = new XMLSerializer()
+    const svgString = serializer.serializeToString(svgClone)
+    
+    // Create blob and download
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `architecture-diagram-${new Date().toISOString().split('T')[0]}.svg`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  // Export as interactive HTML
+  async function handleExportHTML() {
+    // Collect all data needed for the interactive diagram
+    const exportData = {
+      items: filteredItems,
+      relationships: rels.filter(r => {
+        const bothVisible = visibleItemIds.has(r.fromItemId) && visibleItemIds.has(r.toItemId)
+        return bothVisible
+      }),
+      teamMembers,
+      lenses: visibleLenses,
+      tasks,
+      viewMode,
+      layoutMode,
+      zoom,
+      showParentBoxes,
+      visible,
+      layout: {
+        width: layout.width * zoom,
+        height: layout.height * zoom,
+        nodeWidth: layout.nodeWidth,
+        nodeHeight: layout.nodeHeight,
+        headers: layout.headers,
+        parentGroups: layout.parentGroups,
+        nodes: layout.nodes,
+        positions: Array.from(layout.positions.entries()).map(([id, pos]) => ({ id, ...pos }))
+      },
+      managerHierarchy: viewMode === 'skillGaps' || viewMode === 'architectureManager' ? {
+        topLevel: managerHierarchy.topLevel,
+        hierarchy: Array.from(managerHierarchy.hierarchy.entries()),
+        parentMap: Array.from(managerHierarchy.parentMap.entries())
+      } : null,
+      managerPositions: viewMode === 'skillGaps' || viewMode === 'architectureManager' 
+        ? Array.from(managerPositions.entries())
+        : [],
+      managerColors: viewMode === 'skillGaps' || viewMode === 'architectureManager'
+        ? Array.from(managerColors.entries())
+        : [],
+      visibleManagers: viewMode === 'skillGaps' || viewMode === 'architectureManager'
+        ? Array.from(visibleManagers)
+        : []
+    }
+
+    // Create a standalone HTML file with embedded React (via CDN) and all the data
+    const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture Relationship Diagram</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    .fill-slate-700 { fill: #475569; }
+    .fill-slate-800 { fill: #1e293b; }
+    .fill-slate-200 { fill: #e2e8f0; }
+    .fill-blue-600 { fill: #2563eb; }
+    .text-blue-600 { color: #2563eb; }
+    .text-slate-600 { color: #475569; }
+    .text-slate-400 { color: #94a3b8; }
+    .text-slate-700 { color: #334155; }
+    .text-slate-300 { color: #cbd5e1; }
+    .hover\\:fill-blue-600:hover { fill: #2563eb; }
+    .hover\\:text-blue-600:hover { color: #2563eb; }
+    .hover\\:underline:hover { text-decoration: underline; }
+    .hover\\:bg-slate-100:hover { background-color: #f1f5f9; }
+    .hover\\:bg-slate-700:hover { background-color: #334155; }
+    .dark .fill-slate-300 { fill: #cbd5e1; }
+    .dark .fill-slate-200 { fill: #e2e8f0; }
+    .dark .text-blue-400 { color: #60a5fa; }
+    .dark .text-slate-400 { color: #94a3b8; }
+    .dark .hover\\:fill-blue-400:hover { fill: #60a5fa; }
+    .dark .hover\\:text-blue-400:hover { color: #60a5fa; }
+    .dark .hover\\:bg-slate-800:hover { background-color: #1e293b; }
+    .dark .hover\\:bg-slate-700:hover { background-color: #334155; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+    
+    const exportData = ${JSON.stringify(exportData, null, 2)};
+    
+    // Helper functions
+    function getAllReports(managerName, teamMembers) {
+      const reports = new Set([managerName]);
+      function addReports(name) {
+        teamMembers.forEach(member => {
+          if (member.manager === name && !reports.has(member.name)) {
+            reports.add(member.name);
+            addReports(member.name);
+          }
+        });
+      }
+      addReports(managerName);
+      return reports;
+    }
+    
+    function getItemManagerCoverage(item, teamMembers) {
+      if (!item.primaryArchitect && item.secondaryArchitects.length === 0) {
+        return { manager: null, strength: 'none' };
+      }
+      
+      const allManagers = new Set();
+      teamMembers.forEach(member => {
+        const isManager = teamMembers.some(m => m.manager === member.name);
+        if (isManager) allManagers.add(member.name);
+      });
+      
+      for (const managerName of allManagers) {
+        const allReports = getAllReports(managerName, teamMembers);
+        const reportNames = Array.from(allReports);
+        
+        const isPrimary = item.primaryArchitect && reportNames.includes(item.primaryArchitect.trim());
+        const isSecondary = item.secondaryArchitects.some(arch => reportNames.includes(arch.trim()));
+        
+        if (isPrimary) {
+          return { manager: managerName, strength: 'primary' };
+        }
+        if (isSecondary) {
+          return { manager: managerName, strength: 'secondary' };
+        }
+      }
+      
+      return { manager: null, strength: 'none' };
+    }
+    
+    function wrapText(text, maxWidth, fontSize = 10) {
+      if (!text) return [];
+      const words = text.split(' ');
+      const lines = [];
+      let currentLine = '';
+      words.forEach(word => {
+        const testLine = currentLine ? \`\${currentLine} \${word}\` : word;
+        const width = testLine.length * fontSize * 0.6;
+        if (width > maxWidth && currentLine) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      });
+      if (currentLine) lines.push(currentLine);
+      return lines.length > 0 ? lines : [text];
+    }
+    
+    function getTagColor(tag) {
+      let hash = 0;
+      for (let i = 0; i < tag.length; i++) {
+        hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const hue = Math.abs(hash) % 360;
+      return \`hsl(\${hue}, 70%, 85%)\`;
+    }
+    
+    function getTagBorderColor(tag) {
+      let hash = 0;
+      for (let i = 0; i < tag.length; i++) {
+        hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const hue = Math.abs(hash) % 360;
+      return \`hsl(\${hue}, 70%, 50%)\`;
+    }
+    
+    function getLifecycleColor(status) {
+      switch (status) {
+        case 'Plan': return { fill: '#f3f4f6', stroke: '#9ca3af' };
+        case 'Emerging': return { fill: '#fef3c7', stroke: '#f59e0b' };
+        case 'Invest': return { fill: '#d1fae5', stroke: '#10b981' };
+        case 'Divest': return { fill: '#fee2e2', stroke: '#ef4444' };
+        case 'Stable': return { fill: '#f0f9ff', stroke: '#38bdf8' };
+        default: return { fill: '#f0f9ff', stroke: '#38bdf8' };
+      }
+    }
+    
+    function InteractiveDiagram() {
+      const [selectedItemId, setSelectedItemId] = useState(null);
+      const [hoveredItemId, setHoveredItemId] = useState(null);
+      const [selectedManager, setSelectedManager] = useState(null);
+      const [hoveredManager, setHoveredManager] = useState(null);
+      const [filterToRelated, setFilterToRelated] = useState(false);
+      const [showRelationshipLines, setShowRelationshipLines] = useState(true);
+      
+      const { items, relationships, teamMembers, layout, viewMode, managerHierarchy, managerPositions, managerColors, visibleManagers, tasks, showParentBoxes } = exportData;
+      
+      const positionsMap = useMemo(() => {
+        const map = new Map();
+        layout.positions.forEach(p => map.set(p.id, { x: p.x, y: p.y }));
+        return map;
+      }, []);
+      
+      const managerPositionsMap = useMemo(() => {
+        const map = new Map();
+        managerPositions.forEach(([name, pos]) => map.set(name, pos));
+        return map;
+      }, []);
+      
+      const managerColorsMap = useMemo(() => {
+        const map = new Map();
+        managerColors.forEach(([name, colors]) => map.set(name, colors));
+        return map;
+      }, []);
+      
+      const visibleManagersSet = useMemo(() => new Set(visibleManagers), []);
+      
+      const visibleRels = useMemo(() => {
+        const activeItemId = filterToRelated ? selectedItemId : (hoveredItemId || selectedItemId);
+        if (!activeItemId) return [];
+        return relationships.filter(r => 
+          r.fromItemId === activeItemId || r.toItemId === activeItemId
+        );
+      }, [relationships, selectedItemId, hoveredItemId, filterToRelated]);
+      
+      const relatedItemIds = useMemo(() => {
+        const activeItemId = filterToRelated ? selectedItemId : (hoveredItemId || selectedItemId);
+        if (!activeItemId) return new Set();
+        const relatedIds = new Set([activeItemId]);
+        visibleRels.forEach(rel => {
+          if (rel.fromItemId === activeItemId) relatedIds.add(rel.toItemId);
+          else if (rel.toItemId === activeItemId) relatedIds.add(rel.fromItemId);
+        });
+        return relatedIds;
+      }, [visibleRels, selectedItemId, hoveredItemId, filterToRelated]);
+      
+      function posFor(id) {
+        return positionsMap.get(id) || { x: 0, y: 0 };
+      }
+      
+      function getItemColor(item) {
+        const isSelected = selectedItemId === item.id;
+        const isHovered = hoveredItemId === item.id;
+        const isRelated = relatedItemIds.has(item.id);
+        const isActive = isSelected || isHovered || isRelated;
+        
+        if (viewMode === 'tasks') {
+          const openTasks = (tasks || []).filter(t => !t.completedAt && t.itemReferences && t.itemReferences.includes(item.id));
+          const count = openTasks.length;
+          if (count === 0) return { fill: isActive ? "#bbf7d0" : "#dcfce7", stroke: isActive ? "#16a34a" : "#22c55e" };
+          if (count === 1) return { fill: isActive ? "#fed7aa" : "#ffedd5", stroke: isActive ? "#ea580c" : "#f97316" };
+          return { fill: isActive ? "#fecaca" : "#fee2e2", stroke: isActive ? "#dc2626" : "#ef4444" };
+        } else if (viewMode === 'tags') {
+          if (item.tags && item.tags.length > 0) {
+            return { fill: getTagColor(item.tags[0]), stroke: getTagBorderColor(item.tags[0]) };
+          }
+          return { fill: isActive ? "#e5e7eb" : "#f3f4f6", stroke: isActive ? "#9ca3af" : "#d1d5db" };
+        } else if (viewMode === 'summary') {
+          const colors = getLifecycleColor(item.lifecycleStatus);
+          return colors;
+        } else {
+          const hasSkillsGap = !!(item.skillsGaps && item.skillsGaps.trim());
+          const hasPrimaryArchitect = !!(item.primaryArchitect && item.primaryArchitect.trim());
+          const hasSecondaryArchitects = item.secondaryArchitects && item.secondaryArchitects.length > 0;
+          const isRed = hasSkillsGap || (!hasPrimaryArchitect && !hasSecondaryArchitects);
+          
+          if (isRed) {
+            return { fill: isActive ? "#fecaca" : "#fee2e2", stroke: isActive ? "#dc2626" : "#ef4444" };
+          } else if (!hasSkillsGap && hasSecondaryArchitects && !hasPrimaryArchitect) {
+            return { fill: isActive ? "#fed7aa" : "#ffedd5", stroke: isActive ? "#ea580c" : "#f97316" };
+          }
+          return { fill: isActive ? "#bfdbfe" : "#e0f2fe", stroke: isActive ? "#3b82f6" : "#0ea5e9" };
+        }
+      }
+      
+      return (
+        <div style={{ width: '100vw', height: '100vh', overflow: 'auto', backgroundColor: '#f8fafc' }}>
+          <div style={{ padding: '16px', position: 'sticky', top: 0, zIndex: 10, backgroundColor: 'white', borderBottom: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '12px', marginRight: '4px' }}>View: {viewMode}</span>
+              {filterToRelated && selectedItemId && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={showRelationshipLines} 
+                    onChange={e => setShowRelationshipLines(e.target.checked)} 
+                  />
+                  Show relationship lines
+                </label>
+              )}
+            </div>
+          </div>
+          <div style={{ padding: '48px 16px', display: 'flex', justifyContent: 'center' }}>
+            <svg 
+              width={layout.width} 
+              height={layout.height}
+              style={{ display: 'block' }}
+            >
+              {layout.headers.map(header => (
+                <g key={header.key}>
+                  <rect x={header.x} y={header.y} width={header.width} height={header.height} fill="transparent" stroke="#e2e8f0" />
+                  <text x={header.x + header.width / 2} y={header.y + 24} textAnchor="middle" fill="#475569" style={{ fontSize: 14, fontWeight: 600 }}>{header.label}</text>
+                  <line x1={header.x} y1={header.y + 32} x2={header.x + header.width} y2={header.y + 32} stroke="white" />
+                </g>
+              ))}
+              
+              {showParentBoxes && layout.parentGroups && layout.parentGroups.map((group, idx) => (
+                <g key={\`parent-\${group.lens}-\${group.parent}-\${idx}\`}>
+                  <rect 
+                    x={group.x} 
+                    y={group.y} 
+                    width={group.width} 
+                    height={group.height} 
+                    fill="rgba(241, 245, 249, 0.5)" 
+                    stroke="#cbd5e1" 
+                    strokeWidth={2}
+                    rx={4}
+                  />
+                  <text 
+                    x={group.x + 8} 
+                    y={group.y + 16} 
+                    fill="#475569" 
+                    style={{ fontSize: 12, fontWeight: 600 }}
+                  >
+                    {group.parent}
+                  </text>
+                </g>
+              ))}
+              
+              {showRelationshipLines && visibleRels.map((r, i) => {
+                const a = posFor(r.fromItemId);
+                const b = posFor(r.toItemId);
+                const midX = (a.x + b.x) / 2;
+                return (
+                  <path 
+                    key={i} 
+                    d={\`M \${a.x} \${a.y} C \${midX} \${a.y}, \${midX} \${b.y}, \${b.x} \${b.y}\`} 
+                    fill="none" 
+                    stroke="#3b82f6" 
+                    strokeWidth={2} 
+                  />
+                );
+              })}
+              
+              {layout.nodes.map(n => {
+                const colors = getItemColor(n);
+                const isSelected = selectedItemId === n.id;
+                const isHovered = hoveredItemId === n.id;
+                const isRelated = relatedItemIds.has(n.id);
+                const isActive = isSelected || isHovered || isRelated;
+                const strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1);
+                
+                const maxTextWidth = layout.nodeWidth - 8;
+                const nameLines = wrapText(n.name, maxTextWidth, 12);
+                
+                return (
+                  <g 
+                    key={n.id} 
+                    onClick={() => setSelectedItemId(isSelected ? null : n.id)} 
+                    onMouseEnter={() => setHoveredItemId(n.id)}
+                    onMouseLeave={() => setHoveredItemId(null)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <rect 
+                      x={n.x - layout.nodeWidth / 2} 
+                      y={n.y - layout.nodeHeight / 2} 
+                      width={layout.nodeWidth} 
+                      height={layout.nodeHeight} 
+                      rx={6} 
+                      ry={6} 
+                      fill={colors.fill} 
+                      stroke={colors.stroke} 
+                      strokeWidth={strokeWidth} 
+                    />
+                    {nameLines.map((line, idx) => (
+                      <text 
+                        key={\`name-\${idx}\`} 
+                        x={n.x} 
+                        y={n.y - 22 + idx * 11} 
+                        textAnchor="middle" 
+                        fill="#1e293b" 
+                        style={{ fontSize: 12, cursor: 'pointer' }}
+                      >
+                        {line}
+                      </text>
+                    ))}
+                    {(isSelected || isHovered) && (
+                      <foreignObject
+                        x={n.x + layout.nodeWidth / 2 - 20}
+                        y={n.y - layout.nodeHeight / 2 + 2}
+                        width={18}
+                        height={18}
+                      >
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const newFilterState = !filterToRelated;
+                            if (newFilterState === false) {
+                              setSelectedItemId(null);
+                            } else {
+                              setSelectedItemId(n.id);
+                            }
+                            setFilterToRelated(newFilterState);
+                          }}
+                          style={{ 
+                            width: '100%', 
+                            height: '100%', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            borderRadius: '4px', 
+                            border: '1px solid #94a3b8', 
+                            backgroundColor: 'white',
+                            cursor: 'pointer',
+                            padding: 0
+                          }}
+                          title={filterToRelated ? "Show all items" : "Show only related items"}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: filterToRelated ? "#2563eb" : "#475569" }}>
+                            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                          </svg>
+                        </button>
+                      </foreignObject>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+        </div>
+      );
+    }
+    
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<InteractiveDiagram />);
+  </script>
+</body>
+</html>`
+
+    // Create blob and download
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `architecture-diagram-interactive-${new Date().toISOString().split('T')[0]}.html`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
       <div className="flex-1 relative overflow-auto">
@@ -862,6 +1352,10 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
                 <button onClick={() => setZoom(z => Math.min(2, z + 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">+</button>
                 <button onClick={() => setZoom(1)} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Reset</button>
               </div>
+              <div className="flex items-center gap-1 border-l border-slate-300 dark:border-slate-700 pl-2">
+                <button onClick={handleExportSVG} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800" title="Export as SVG">Export SVG</button>
+                <button onClick={handleExportHTML} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800" title="Export as interactive HTML">Export HTML</button>
+              </div>
             </div>
             {showInstructions && (
               <div className="flex items-center gap-2">
@@ -886,6 +1380,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
       </div>
       <div style={{ paddingTop: '48px', width: Math.max(dims.w, layout.width * zoom) + 'px', minWidth: '100%' }}>
         <svg 
+          ref={svgRef}
           width={layout.width} 
           height={layout.height} 
           className="block" 

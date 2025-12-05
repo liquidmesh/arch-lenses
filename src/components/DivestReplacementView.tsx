@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { db, getAllLenses } from '../db'
 import { type ItemRecord, type RelationshipRecord, type LensKey, type LifecycleStatus, LENSES } from '../types'
 import { ItemDialog } from './ItemDialog'
@@ -32,6 +32,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
   })
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editItem, setEditItem] = useState<ItemRecord | null>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadData()
@@ -260,6 +261,322 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     return status || 'No Status'
   }
 
+  // Export as SVG
+  function handleExportSVG() {
+    if (!contentRef.current || !primaryLens || !secondaryLens || itemAnalysis.length === 0) return
+
+    // Calculate dimensions
+    const padding = 20
+    const rowHeight = 60
+    const headerHeight = 40
+    const primaryColWidth = 200
+    const currentColWidth = 400
+    const targetColWidth = 400
+    const colGap = 20
+    const rowGap = 10
+    const boxHeight = 40
+    const boxWidth = 120
+    const boxesPerRow = 3
+    const boxGap = 4
+
+    // Calculate total height (no title, so start at header)
+    let calculatedHeight = padding + headerHeight
+    sortedParents.forEach(parent => {
+      const groupItems = groupedItemAnalysis.get(parent)!
+      if (parent) {
+        calculatedHeight += 20 // Parent header
+      }
+      groupItems.forEach(({ divestItems, targetItems }) => {
+        const maxItems = Math.max(divestItems.length, targetItems.length)
+        const numRows = Math.ceil(maxItems / boxesPerRow)
+        const rowHeightForItem = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight)
+        calculatedHeight += rowHeightForItem + rowGap
+      })
+    })
+
+    const totalWidth = padding + primaryColWidth + colGap + currentColWidth + colGap + targetColWidth + padding
+    const initialHeight = calculatedHeight + padding
+
+    // Create SVG
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.setAttribute('width', String(totalWidth))
+    svg.setAttribute('height', String(initialHeight))
+    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+
+    // Add style element for fonts
+    const style = document.createElementNS('http://www.w3.org/2000/svg', 'style')
+    style.textContent = `
+      .header { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: 600; fill: #334155; }
+      .primary-name { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: bold; fill: #1e293b; }
+      .primary-desc { font-family: system-ui, -apple-system, sans-serif; font-size: 10px; fill: #475569; }
+      .item-name { font-family: system-ui, -apple-system, sans-serif; font-size: 10px; fill: #1e293b; }
+      .item-minor { font-family: system-ui, -apple-system, sans-serif; font-size: 8px; fill: #475569; }
+      .parent-label { font-family: system-ui, -apple-system, sans-serif; font-size: 10px; font-weight: 500; fill: #64748b; }
+    `
+    svg.appendChild(style)
+
+    // Background
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+    bg.setAttribute('width', String(totalWidth))
+    bg.setAttribute('height', String(initialHeight))
+    bg.setAttribute('fill', '#f8fafc')
+    svg.appendChild(bg)
+
+    // Column headers
+    let headerY = padding + headerHeight
+    const headerLine = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+    headerLine.setAttribute('x1', String(padding))
+    headerLine.setAttribute('y1', String(headerY))
+    headerLine.setAttribute('x2', String(totalWidth - padding))
+    headerLine.setAttribute('y2', String(headerY))
+    headerLine.setAttribute('stroke', '#cbd5e1')
+    headerLine.setAttribute('stroke-width', '2')
+    svg.appendChild(headerLine)
+
+    const primaryLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+    primaryLabel.setAttribute('x', String(padding + primaryColWidth / 2))
+    primaryLabel.setAttribute('y', String(headerY - 10))
+    primaryLabel.setAttribute('class', 'header')
+    primaryLabel.setAttribute('text-anchor', 'middle')
+    primaryLabel.textContent = LENSES.find(l => l.key === primaryLens)?.label || primaryLens
+    svg.appendChild(primaryLabel)
+
+    const currentLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+    currentLabel.setAttribute('x', String(padding + primaryColWidth + colGap + currentColWidth / 2))
+    currentLabel.setAttribute('y', String(headerY - 10))
+    currentLabel.setAttribute('class', 'header')
+    currentLabel.setAttribute('text-anchor', 'middle')
+    currentLabel.textContent = 'Current'
+    svg.appendChild(currentLabel)
+
+    const targetLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+    targetLabel.setAttribute('x', String(padding + primaryColWidth + colGap + currentColWidth + colGap + targetColWidth / 2))
+    targetLabel.setAttribute('y', String(headerY - 10))
+    targetLabel.setAttribute('class', 'header')
+    targetLabel.setAttribute('text-anchor', 'middle')
+    targetLabel.textContent = 'Target'
+    svg.appendChild(targetLabel)
+
+    // Draw items
+    let currentY = headerY + padding + rowGap
+    sortedParents.forEach(parent => {
+      const groupItems = groupedItemAnalysis.get(parent)!
+      
+      // Parent header
+      if (parent) {
+        const parentText = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+        parentText.setAttribute('x', String(padding))
+        parentText.setAttribute('y', String(currentY))
+        parentText.setAttribute('class', 'parent-label')
+        parentText.textContent = parent
+        svg.appendChild(parentText)
+        currentY += 20
+      }
+
+      // Calculate actual group height
+      let groupHeight = 0
+      groupItems.forEach(({ divestItems, targetItems }) => {
+        const maxItems = Math.max(divestItems.length, targetItems.length)
+        const numRows = Math.ceil(maxItems / boxesPerRow)
+        const rowHeightForItem = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight)
+        groupHeight += rowHeightForItem + (groupHeight > 0 ? rowGap : 0)
+      })
+
+      // Group container
+      const groupRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+      groupRect.setAttribute('x', String(padding))
+      groupRect.setAttribute('y', String(currentY))
+      groupRect.setAttribute('width', String(totalWidth - padding * 2))
+      groupRect.setAttribute('height', String(groupHeight))
+      groupRect.setAttribute('fill', 'white')
+      groupRect.setAttribute('stroke', '#cbd5e1')
+      groupRect.setAttribute('stroke-width', '1')
+      groupRect.setAttribute('rx', '4')
+      svg.appendChild(groupRect)
+
+      let rowOffset = 0
+      groupItems.forEach(({ primaryItem, divestItems, targetItems }, idx) => {
+        const maxItems = Math.max(divestItems.length, targetItems.length)
+        const numRows = Math.ceil(maxItems / boxesPerRow)
+        const rowHeightForItem = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight)
+        const rowY = currentY + rowOffset
+        
+        // Row separator
+        if (idx > 0) {
+          const separator = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+          separator.setAttribute('x1', String(padding))
+          separator.setAttribute('y1', String(rowY))
+          separator.setAttribute('x2', String(totalWidth - padding))
+          separator.setAttribute('y2', String(rowY))
+          separator.setAttribute('stroke', '#e2e8f0')
+          separator.setAttribute('stroke-width', '1')
+          svg.appendChild(separator)
+        }
+
+        // Primary item name
+        const primaryName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+        primaryName.setAttribute('x', String(padding + 10))
+        primaryName.setAttribute('y', String(rowY + 20))
+        primaryName.setAttribute('class', 'primary-name')
+        primaryName.textContent = primaryItem.name
+        svg.appendChild(primaryName)
+
+        // Primary item description (if shown)
+        if (minorTextOption !== 'none' && primaryItem.description) {
+          const primaryDesc = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+          primaryDesc.setAttribute('x', String(padding + 10))
+          primaryDesc.setAttribute('y', String(rowY + 35))
+          primaryDesc.setAttribute('class', 'primary-desc')
+          const descText = primaryItem.description.length > 50 ? primaryItem.description.substring(0, 50) + '...' : primaryItem.description
+          primaryDesc.textContent = descText
+          svg.appendChild(primaryDesc)
+        }
+
+        // Current column items
+        const currentStartX = padding + primaryColWidth + colGap
+        divestItems.forEach((item, itemIdx) => {
+          const col = itemIdx % boxesPerRow
+          const row = Math.floor(itemIdx / boxesPerRow)
+          const boxX = currentStartX + col * (boxWidth + boxGap)
+          const boxY = rowY + row * (boxHeight + boxGap)
+
+          // Box
+          const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+          box.setAttribute('x', String(boxX))
+          box.setAttribute('y', String(boxY))
+          box.setAttribute('width', String(boxWidth))
+          box.setAttribute('height', String(boxHeight))
+          box.setAttribute('rx', '4')
+          if (item.lifecycleStatus === 'Divest') {
+            box.setAttribute('fill', '#fee2e2')
+            box.setAttribute('stroke', '#ef4444')
+          } else if (!item.lifecycleStatus) {
+            box.setAttribute('fill', '#f3f4f6')
+            box.setAttribute('stroke', '#9ca3af')
+          } else {
+            box.setAttribute('fill', '#dbeafe')
+            box.setAttribute('stroke', '#3b82f6')
+          }
+          box.setAttribute('stroke-width', '1')
+          svg.appendChild(box)
+
+          // Item name
+          const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+          itemName.setAttribute('x', String(boxX + boxWidth / 2))
+          itemName.setAttribute('y', String(boxY + 15))
+          itemName.setAttribute('class', 'item-name')
+          itemName.setAttribute('text-anchor', 'middle')
+          const nameText = item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name
+          itemName.textContent = nameText
+          svg.appendChild(itemName)
+
+          // Minor text
+          if (minorTextOption === 'lifecycle') {
+            const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+            minor.setAttribute('x', String(boxX + boxWidth / 2))
+            minor.setAttribute('y', String(boxY + 28))
+            minor.setAttribute('class', 'item-minor')
+            minor.setAttribute('text-anchor', 'middle')
+            minor.textContent = getLifecycleLabel(item.lifecycleStatus)
+            svg.appendChild(minor)
+          } else if (minorTextOption === 'description' && item.description) {
+            const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+            minor.setAttribute('x', String(boxX + boxWidth / 2))
+            minor.setAttribute('y', String(boxY + 28))
+            minor.setAttribute('class', 'item-minor')
+            minor.setAttribute('text-anchor', 'middle')
+            const descText = item.description.length > 20 ? item.description.substring(0, 20) + '...' : item.description
+            minor.textContent = descText
+            svg.appendChild(minor)
+          }
+        })
+
+        // Target column items
+        const targetStartX = padding + primaryColWidth + colGap + currentColWidth + colGap
+        targetItems.forEach((item, itemIdx) => {
+          const col = itemIdx % boxesPerRow
+          const row = Math.floor(itemIdx / boxesPerRow)
+          const boxX = targetStartX + col * (boxWidth + boxGap)
+          const boxY = rowY + row * (boxHeight + boxGap)
+
+          // Box
+          const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+          box.setAttribute('x', String(boxX))
+          box.setAttribute('y', String(boxY))
+          box.setAttribute('width', String(boxWidth))
+          box.setAttribute('height', String(boxHeight))
+          box.setAttribute('rx', '4')
+          if (item.lifecycleStatus === 'Divest') {
+            box.setAttribute('fill', '#fee2e2')
+            box.setAttribute('stroke', '#ef4444')
+          } else if (!item.lifecycleStatus) {
+            box.setAttribute('fill', '#f3f4f6')
+            box.setAttribute('stroke', '#9ca3af')
+          } else {
+            box.setAttribute('fill', '#dbeafe')
+            box.setAttribute('stroke', '#3b82f6')
+          }
+          box.setAttribute('stroke-width', '1')
+          svg.appendChild(box)
+
+          // Item name
+          const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+          itemName.setAttribute('x', String(boxX + boxWidth / 2))
+          itemName.setAttribute('y', String(boxY + 15))
+          itemName.setAttribute('class', 'item-name')
+          itemName.setAttribute('text-anchor', 'middle')
+          const nameText = item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name
+          itemName.textContent = nameText
+          svg.appendChild(itemName)
+
+          // Minor text
+          if (minorTextOption === 'lifecycle') {
+            const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+            minor.setAttribute('x', String(boxX + boxWidth / 2))
+            minor.setAttribute('y', String(boxY + 28))
+            minor.setAttribute('class', 'item-minor')
+            minor.setAttribute('text-anchor', 'middle')
+            minor.textContent = getLifecycleLabel(item.lifecycleStatus)
+            svg.appendChild(minor)
+          } else if (minorTextOption === 'description' && item.description) {
+            const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+            minor.setAttribute('x', String(boxX + boxWidth / 2))
+            minor.setAttribute('y', String(boxY + 28))
+            minor.setAttribute('class', 'item-minor')
+            minor.setAttribute('text-anchor', 'middle')
+            const descText = item.description.length > 20 ? item.description.substring(0, 20) + '...' : item.description
+            minor.textContent = descText
+            svg.appendChild(minor)
+          }
+        })
+        
+        rowOffset += rowHeightForItem + (idx < groupItems.length - 1 ? rowGap : 0)
+      })
+
+      currentY += groupHeight + rowGap
+    })
+    
+    // Update SVG height to match actual content
+    const finalHeight = currentY + padding
+    svg.setAttribute('height', String(finalHeight))
+    bg.setAttribute('height', String(finalHeight))
+
+    // Serialize to string
+    const serializer = new XMLSerializer()
+    const svgString = serializer.serializeToString(svg)
+
+    // Create blob and download
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `target-view-${new Date().toISOString().split('T')[0]}.svg`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   // Filter items for autocomplete
   const filterItemOptions = useMemo(() => {
     if (!filterItemQuery.trim()) return []
@@ -312,6 +629,15 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       <div className="flex items-center gap-4 p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
         <h1 className="text-xl font-semibold">Target View</h1>
         <div className="flex items-center gap-4 ml-auto">
+          {primaryLens && secondaryLens && itemAnalysis.length > 0 && (
+            <button
+              onClick={handleExportSVG}
+              className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+              title="Export as SVG"
+            >
+              Export SVG
+            </button>
+          )}
           <label className="flex items-center gap-2">
             <span className="text-xs">Primary Lens:</span>
             <select
@@ -412,7 +738,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       <div className="flex-1 overflow-y-auto p-3">
         {primaryLens && secondaryLens ? (
           itemAnalysis.length > 0 ? (
-            <div className="max-w-7xl mx-auto">
+            <div ref={contentRef} className="max-w-7xl mx-auto">
               {/* Column headers */}
               <div className="grid grid-cols-[200px_1fr_1fr] gap-3 mb-2 pb-2 border-b-2 border-slate-300 dark:border-slate-700">
                 <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">

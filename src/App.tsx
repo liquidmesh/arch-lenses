@@ -4,7 +4,7 @@ import { Sidebar } from './components/Sidebar'
 import { LensPanel } from './components/LensPanel'
 import { Navigation } from './components/Navigation'
 import { LENSES, type LensKey, type ExportBundle, type LensDefinition } from './types'
-import { seedIfEmpty, db } from './db'
+import { seedIfEmpty, db, ensureDbReady } from './db'
 import { GraphModal } from './components/GraphModal'
 import { TeamModal } from './components/TeamModal'
 import { TeamManager } from './components/TeamManager'
@@ -75,12 +75,26 @@ function App() {
 
   useEffect(() => {
     async function init() {
-      await seedIfEmpty()
-      // Load lenses from database
-      const dbLenses = await getAllLenses()
-      if (dbLenses.length > 0) {
-        setLenses(dbLenses)
-        setVisible(Object.fromEntries(dbLenses.map(l => [l.key, true])) as Record<LensKey, boolean>)
+      try {
+        // Ensure database is ready (open and migrations complete)
+        await ensureDbReady()
+        await seedIfEmpty()
+        // Load lenses from database (getAllLenses will seed if needed)
+        const dbLenses = await getAllLenses()
+        if (dbLenses.length > 0) {
+          setLenses(dbLenses)
+          setVisible(Object.fromEntries(dbLenses.map(l => [l.key, true])) as Record<LensKey, boolean>)
+        } else {
+          // If still no lenses after getAllLenses (which should have seeded), use defaults as fallback
+          console.error('Failed to load lenses from database, using defaults')
+          setLenses(LENSES)
+          setVisible(Object.fromEntries(LENSES.map(l => [l.key, true])) as Record<LensKey, boolean>)
+        }
+      } catch (error) {
+        console.error('Error initializing app:', error)
+        // Fallback to defaults on error
+        setLenses(LENSES)
+        setVisible(Object.fromEntries(LENSES.map(l => [l.key, true])) as Record<LensKey, boolean>)
       }
     }
     init()
@@ -230,61 +244,70 @@ function App() {
     const message = `Import will REPLACE the following data types:\n\n${selectedTypes.join('\n')}\n\nThis will completely replace existing data of these types. Continue?`
     if (!confirm(message)) return
     
-    // Determine which tables to clear and import
-    const tablesToClear: string[] = []
-    if (importOptions.lenses) {
-      tablesToClear.push('items', 'relationships')
-    }
-    if (importOptions.people) {
-      tablesToClear.push('teamMembers')
-    }
-    if (importOptions.notes) {
-      tablesToClear.push('meetingNotes', 'tasks')
-    }
-    
-    await db.transaction('rw', [db.items, db.relationships, db.teamMembers, db.meetingNotes, db.tasks], async () => {
-      // Clear only selected tables
+    try {
+      // Ensure database is ready
+      await ensureDbReady()
+      
+      // Determine which tables to clear and import
+      const tablesToClear: string[] = []
       if (importOptions.lenses) {
-        await db.items.clear()
-        await db.relationships.clear()
+        tablesToClear.push('items', 'relationships')
       }
       if (importOptions.people) {
-        await db.teamMembers.clear()
+        tablesToClear.push('teamMembers')
       }
       if (importOptions.notes) {
-        await db.meetingNotes.clear()
-        await db.tasks.clear()
+        tablesToClear.push('meetingNotes', 'tasks')
       }
       
-      // Import only selected data
-      if (importOptions.lenses && importData.items) {
-        await db.items.bulkAdd(importData.items)
-        if (importData.relationships) {
-          await db.relationships.bulkAdd(importData.relationships)
+      await db.transaction('rw', [db.items, db.relationships, db.teamMembers, db.meetingNotes, db.tasks], async () => {
+        // Clear only selected tables
+        if (importOptions.lenses) {
+          await db.items.clear()
+          await db.relationships.clear()
         }
-      }
-      if (importOptions.people && importData.teamMembers) {
-        await db.teamMembers.bulkAdd(importData.teamMembers)
-      }
-      if (importOptions.notes) {
-        if (importData.meetingNotes) {
-          await db.meetingNotes.bulkAdd(importData.meetingNotes)
+        if (importOptions.people) {
+          await db.teamMembers.clear()
         }
-        if (importData.tasks) {
-          await db.tasks.bulkAdd(importData.tasks)
+        if (importOptions.notes) {
+          await db.meetingNotes.clear()
+          await db.tasks.clear()
         }
-      }
-    })
-    
-    alert('Import complete')
-    setImportDialogOpen(false)
-    setImportFile(null)
-    setImportData(null)
-    setImportOptions({ lenses: false, people: false, notes: false })
-    
-    // Refresh views
-    setTeamModalRefreshKey(k => k + 1)
-    setLensOrderKey(k => k + 1)
+        
+        // Import only selected data
+        if (importOptions.lenses && importData.items) {
+          await db.items.bulkAdd(importData.items)
+          if (importData.relationships) {
+            await db.relationships.bulkAdd(importData.relationships)
+          }
+        }
+        if (importOptions.people && importData.teamMembers) {
+          await db.teamMembers.bulkAdd(importData.teamMembers)
+        }
+        if (importOptions.notes) {
+          if (importData.meetingNotes) {
+            await db.meetingNotes.bulkAdd(importData.meetingNotes)
+          }
+          if (importData.tasks) {
+            await db.tasks.bulkAdd(importData.tasks)
+          }
+        }
+      })
+      
+      alert('Import complete')
+      setImportDialogOpen(false)
+      setImportFile(null)
+      setImportData(null)
+      setImportOptions({ lenses: false, people: false, notes: false })
+      
+      // Refresh views
+      setTeamModalRefreshKey(k => k + 1)
+      setLensOrderKey(k => k + 1)
+      await reloadLenses()
+    } catch (error) {
+      console.error('Error during import:', error)
+      alert(`Import failed: ${error instanceof Error ? error.message : String(error)}\n\nPlease check the browser console for details.`)
+    }
   }
 
   function handleNavigate(view: ViewType) {

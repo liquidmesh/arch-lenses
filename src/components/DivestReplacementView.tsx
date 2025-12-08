@@ -30,13 +30,13 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     const saved = localStorage.getItem('divest-replacement-minor-text')
     return (saved === 'none' || saved === 'lifecycle' || saved === 'description') ? saved : 'lifecycle'
   })
-  const [rollupLens, setRollupLens] = useState<LensKey | ''>(() => {
+  const [rollupLens, setRollupLens] = useState<LensKey | '' | '__parent__'>(() => {
     const saved = localStorage.getItem('divest-replacement-rollup-lens')
-    return saved || ''
+    return (saved === '__parent__' || saved === '' || LENSES.some(l => l.key === saved)) ? (saved || '') : ''
   })
-  const [rollupMode, setRollupMode] = useState<'none' | 'only-related' | 'show-secondary'>(() => {
+  const [rollupMode, setRollupMode] = useState<'only-related' | 'show-secondary'>(() => {
     const saved = localStorage.getItem('divest-replacement-rollup-mode')
-    return (saved === 'none' || saved === 'only-related' || saved === 'show-secondary') ? saved : 'none'
+    return (saved === 'only-related' || saved === 'show-secondary') ? saved : 'only-related'
   })
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editItem, setEditItem] = useState<ItemRecord | null>(null)
@@ -84,12 +84,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       localStorage.setItem('divest-replacement-rollup-lens', rollupLens)
     } else {
       localStorage.removeItem('divest-replacement-rollup-lens')
-      // Reset rollup mode when rollup lens is cleared
-      if (rollupMode !== 'none') {
-        setRollupMode('none')
-      }
     }
-  }, [rollupLens, rollupMode])
+  }, [rollupLens])
 
   // Persist roll-up mode to localStorage
   useEffect(() => {
@@ -185,57 +181,81 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       // Build roll-up maps if roll-up is enabled (used for both filtering and grouping)
       let secondaryToRollupMap: Map<number, ItemRecord[]> | null = null
       let rollupToSecondaryMap: Map<number, ItemRecord[]> | null = null
+      let parentToSecondaryMap: Map<string, ItemRecord[]> | null = null // For parent-based grouping
       
       // Store original relatedItems before filtering (needed for ungrouped items calculation)
       const allRelatedItems = [...relatedItems]
       
-      if (rollupLens && rollupMode !== 'none') {
-        // For each secondary item, find related items in roll-up lens
-        secondaryToRollupMap = new Map<number, ItemRecord[]>() // secondary item ID -> roll-up items
-        rollupToSecondaryMap = new Map<number, ItemRecord[]>() // roll-up item ID -> secondary items
-        
-        relatedItems.forEach(secondaryItem => {
-          // Find relationships between secondary item and roll-up lens items
-          const rollupRels = relationships.filter(rel => {
-            return (
-              (rel.fromItemId === secondaryItem.id && rel.toLens === rollupLens) ||
-              (rel.toItemId === secondaryItem.id && rel.fromLens === rollupLens)
+      if (rollupLens) {
+        if (rollupLens === '__parent__') {
+          // Group by parent property of secondary items
+          parentToSecondaryMap = new Map<string, ItemRecord[]>() // parent name -> secondary items
+          
+          relatedItems.forEach(secondaryItem => {
+            const parent = secondaryItem.parent || '(No Parent)'
+            const map = parentToSecondaryMap!
+            if (!map.has(parent)) {
+              map.set(parent, [])
+            }
+            map.get(parent)!.push(secondaryItem)
+          })
+          
+          // Apply filtering based on rollupMode
+          if (rollupMode === 'only-related') {
+            // Only show secondary items that have a parent
+            relatedItems = relatedItems.filter(item => item.parent)
+          }
+          // 'show-secondary' mode: show all secondary items (no filtering needed)
+        } else {
+          // For each secondary item, find related items in roll-up lens
+          secondaryToRollupMap = new Map<number, ItemRecord[]>() // secondary item ID -> roll-up items
+          rollupToSecondaryMap = new Map<number, ItemRecord[]>() // roll-up item ID -> secondary items
+          
+          relatedItems.forEach(secondaryItem => {
+            // Find relationships between secondary item and roll-up lens items
+            const rollupRels = relationships.filter(rel => {
+              return (
+                (rel.fromItemId === secondaryItem.id && rel.toLens === rollupLens) ||
+                (rel.toItemId === secondaryItem.id && rel.fromLens === rollupLens)
+              )
+            })
+            
+            const rollupItemIds = new Set<number>()
+            rollupRels.forEach(rel => {
+              if (rel.fromItemId === secondaryItem.id) {
+                rollupItemIds.add(rel.toItemId)
+              } else {
+                rollupItemIds.add(rel.fromItemId)
+              }
+            })
+            
+            const rollupItems = items.filter(item => 
+              item.lens === rollupLens && rollupItemIds.has(item.id!)
             )
-          })
-          
-          const rollupItemIds = new Set<number>()
-          rollupRels.forEach(rel => {
-            if (rel.fromItemId === secondaryItem.id) {
-              rollupItemIds.add(rel.toItemId)
-            } else {
-              rollupItemIds.add(rel.fromItemId)
+            
+            if (secondaryToRollupMap) {
+              secondaryToRollupMap.set(secondaryItem.id!, rollupItems)
             }
+            
+            // Build reverse map
+            rollupItems.forEach(rollupItem => {
+              if (!rollupToSecondaryMap!.has(rollupItem.id!)) {
+                rollupToSecondaryMap!.set(rollupItem.id!, [])
+              }
+              rollupToSecondaryMap!.get(rollupItem.id!)!.push(secondaryItem)
+            })
           })
           
-          const rollupItems = items.filter(item => 
-            item.lens === rollupLens && rollupItemIds.has(item.id!)
-          )
-          
-          secondaryToRollupMap.set(secondaryItem.id!, rollupItems)
-          
-          // Build reverse map
-          rollupItems.forEach(rollupItem => {
-            if (!rollupToSecondaryMap!.has(rollupItem.id!)) {
-              rollupToSecondaryMap!.set(rollupItem.id!, [])
-            }
-            rollupToSecondaryMap!.get(rollupItem.id!)!.push(secondaryItem)
-          })
-        })
-        
-        // Apply filtering based on rollupMode
-        if (rollupMode === 'only-related') {
-          // Only show secondary items that have relationships to roll-up items
-          relatedItems = relatedItems.filter(item => {
-            const rollupItems = secondaryToRollupMap!.get(item.id!)
-            return rollupItems && rollupItems.length > 0
-          })
+          // Apply filtering based on rollupMode
+          if (rollupMode === 'only-related') {
+            // Only show secondary items that have relationships to roll-up items
+            relatedItems = relatedItems.filter(item => {
+              const rollupItems = secondaryToRollupMap!.get(item.id!)
+              return rollupItems && rollupItems.length > 0
+            })
+          }
+          // 'show-secondary' mode: show all secondary items (no filtering needed)
         }
-        // 'show-secondary' mode: show all secondary items (no filtering needed)
       }
 
       // Categorize by lifecycle status, considering both item lifecycle and relationship lifecycle
@@ -317,62 +337,129 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       ]
 
       // Apply roll-up grouping if enabled
-      if (rollupLens && rollupMode !== 'none' && rollupToSecondaryMap) {
-        // Get all roll-up items that have related secondary items
-        const rollupItems = Array.from(rollupToSecondaryMap.keys())
-          .map(id => items.find(item => item.id === id))
-          .filter((item): item is ItemRecord => !!item)
-          .sort((a, b) => a.name.localeCompare(b.name))
-        
-        // Group current and target items by roll-up items
-        const rollupGroups = rollupItems.map(rollupItem => {
-          const relatedSecondary = rollupToSecondaryMap.get(rollupItem.id!) || []
-          const groupCurrentItems = currentItems.filter(item => relatedSecondary.includes(item))
-          const groupTargetItems = targetItemsWithNoStatus.filter(item => relatedSecondary.includes(item))
+      if (rollupLens) {
+        if (rollupLens === '__parent__' && parentToSecondaryMap) {
+          // Group by parent property
+          // For "show-secondary" mode, exclude "(No Parent)" from rollupGroups - those items will be shown directly
+          const parentNames = Array.from(parentToSecondaryMap.keys())
+            .filter(parentName => {
+              // In "show-secondary" mode, exclude "(No Parent)" - those items will be shown directly
+              if (rollupMode === 'show-secondary' && parentName === '(No Parent)') {
+                return false
+              }
+              return true
+            })
+            .sort((a, b) => {
+              if (a === '(No Parent)') return 1
+              if (b === '(No Parent)') return -1
+              return a.localeCompare(b)
+            })
+          
+          // Group current and target items by parent
+          const rollupGroups = parentNames.map(parentName => {
+            const relatedSecondary = parentToSecondaryMap!.get(parentName) || []
+            const groupCurrentItems = currentItems.filter(item => relatedSecondary.includes(item))
+            const groupTargetItems = targetItemsWithNoStatus.filter(item => relatedSecondary.includes(item))
+            
+            // Create a fake rollupItem for parent grouping
+            const rollupItem: ItemRecord = {
+              id: undefined,
+              lens: secondaryLens,
+              name: parentName,
+              description: undefined,
+              lifecycleStatus: undefined,
+              secondaryArchitects: [],
+              tags: [],
+              hyperlinks: [],
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            }
+            
+            return {
+              rollupItem,
+              divestItems: groupCurrentItems,
+              targetItems: groupTargetItems,
+            }
+          })
+          
+          // Handle secondary items that don't have a parent
+          const ungroupedSecondaryItems: ItemRecord[] = []
+          if (rollupMode === 'only-related') {
+            // Items without a parent
+            ungroupedSecondaryItems.push(...allRelatedItems.filter(item => !item.parent))
+          } else if (rollupMode === 'show-secondary') {
+            // Items without a parent - show these directly instead of under "(No Parent)"
+            ungroupedSecondaryItems.push(...[...currentItems, ...targetItemsWithNoStatus].filter(item => !item.parent))
+          }
           
           return {
-            rollupItem,
-            divestItems: groupCurrentItems,
-            targetItems: groupTargetItems,
+            primaryItem,
+            divestItems: currentItems,
+            replacementItems,
+            otherItems,
+            targetItems: targetItemsWithNoStatus,
+            rollupGroups,
+            ungroupedSecondaryItems,
+            hasRollup: true,
+            itemRelLifecycleMap,
           }
-        })
-        
-        // Handle secondary items that don't have roll-up relationships
-        const ungroupedSecondaryItems: ItemRecord[] = []
-        if ((rollupMode === 'show-secondary' || rollupMode === 'only-related') && secondaryToRollupMap) {
-          // For "only-related" mode, use allRelatedItems (before filtering) to find ungrouped items
-          // For "show-secondary" mode, use currentItems and targetItemsWithNoStatus
-          const itemsToCheck = rollupMode === 'only-related' ? allRelatedItems : [...currentItems, ...targetItemsWithNoStatus]
+        } else if (rollupToSecondaryMap) {
+          // Get all roll-up items that have related secondary items
+          const rollupItems = Array.from(rollupToSecondaryMap.keys())
+            .map(id => items.find(item => item.id === id))
+            .filter((item): item is ItemRecord => !!item)
+            .sort((a, b) => a.name.localeCompare(b.name))
           
-          // Collect all unique secondary items (deduplicate by id)
-          const allSecondaryItemsSet = new Set<number>()
-          const allSecondaryItemsMap = new Map<number, ItemRecord>()
-          itemsToCheck.forEach(item => {
-            if (item.id && !allSecondaryItemsSet.has(item.id)) {
-              allSecondaryItemsSet.add(item.id)
-              allSecondaryItemsMap.set(item.id, item)
+          // Group current and target items by roll-up items
+          const rollupGroups = rollupItems.map(rollupItem => {
+            const relatedSecondary = rollupToSecondaryMap!.get(rollupItem.id!) || []
+            const groupCurrentItems = currentItems.filter(item => relatedSecondary.includes(item))
+            const groupTargetItems = targetItemsWithNoStatus.filter(item => relatedSecondary.includes(item))
+            
+            return {
+              rollupItem,
+              divestItems: groupCurrentItems,
+              targetItems: groupTargetItems,
             }
           })
           
-          // Find items that don't have roll-up relationships
-          allSecondaryItemsMap.forEach((item, itemId) => {
-            const rollupItems = secondaryToRollupMap.get(itemId)
-            if (!rollupItems || rollupItems.length === 0) {
-              ungroupedSecondaryItems.push(item)
-            }
-          })
-        }
-        
-        return {
-          primaryItem,
-          divestItems: currentItems, // Keep for backward compatibility
-          replacementItems,
-          otherItems,
-          targetItems: targetItemsWithNoStatus, // Keep for backward compatibility
-          rollupGroups,
-          ungroupedSecondaryItems,
-          hasRollup: true,
-          itemRelLifecycleMap, // Include for categorizing ungrouped items
+          // Handle secondary items that don't have roll-up relationships
+          const ungroupedSecondaryItems: ItemRecord[] = []
+          if ((rollupMode === 'show-secondary' || rollupMode === 'only-related') && secondaryToRollupMap) {
+            // For "only-related" mode, use allRelatedItems (before filtering) to find ungrouped items
+            // For "show-secondary" mode, use currentItems and targetItemsWithNoStatus
+            const itemsToCheck = rollupMode === 'only-related' ? allRelatedItems : [...currentItems, ...targetItemsWithNoStatus]
+            
+            // Collect all unique secondary items (deduplicate by id)
+            const allSecondaryItemsSet = new Set<number>()
+            const allSecondaryItemsMap = new Map<number, ItemRecord>()
+            itemsToCheck.forEach(item => {
+              if (item.id && !allSecondaryItemsSet.has(item.id)) {
+                allSecondaryItemsSet.add(item.id)
+                allSecondaryItemsMap.set(item.id, item)
+              }
+            })
+            
+            // Find items that don't have roll-up relationships
+            allSecondaryItemsMap.forEach((item, itemId) => {
+              const rollupItems = secondaryToRollupMap.get(itemId)
+              if (!rollupItems || rollupItems.length === 0) {
+                ungroupedSecondaryItems.push(item)
+              }
+            })
+          }
+          
+          return {
+            primaryItem,
+            divestItems: currentItems, // Keep for backward compatibility
+            replacementItems,
+            otherItems,
+            targetItems: targetItemsWithNoStatus, // Keep for backward compatibility
+            rollupGroups,
+            ungroupedSecondaryItems,
+            hasRollup: true,
+            itemRelLifecycleMap, // Include for categorizing ungrouped items
+          }
         }
       }
 
@@ -740,7 +827,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               rollupHeader.setAttribute('x', String(padding + 10))
               rollupHeader.setAttribute('y', String(rowY - 5))
               rollupHeader.setAttribute('class', 'parent-label')
-              rollupHeader.textContent = `${LENSES.find(l => l.key === rollupLens)?.label || rollupLens}: ${group.rollupItem.name}`
+              const rollupLabel = rollupLens === '__parent__' ? 'Parent' : (LENSES.find(l => l.key === rollupLens)?.label || rollupLens)
+              rollupHeader.textContent = `${rollupLabel}: ${group.rollupItem.name}`
               svg.appendChild(rollupHeader)
             } else if (groupIdx === 0) {
               // Primary item name for new primary item
@@ -756,7 +844,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               rollupHeader.setAttribute('x', String(padding + 10))
               rollupHeader.setAttribute('y', String(rowY + 10))
               rollupHeader.setAttribute('class', 'parent-label')
-              rollupHeader.textContent = `${LENSES.find(l => l.key === rollupLens)?.label || rollupLens}: ${group.rollupItem.name}`
+              const rollupLabel = rollupLens === '__parent__' ? 'Parent' : (LENSES.find(l => l.key === rollupLens)?.label || rollupLens)
+              rollupHeader.textContent = `${rollupLabel}: ${group.rollupItem.name}`
               svg.appendChild(rollupHeader)
             } else {
               // Roll-up header for subsequent groups
@@ -764,7 +853,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               rollupHeader.setAttribute('x', String(padding + 10))
               rollupHeader.setAttribute('y', String(rowY - 5))
               rollupHeader.setAttribute('class', 'parent-label')
-              rollupHeader.textContent = `${LENSES.find(l => l.key === rollupLens)?.label || rollupLens}: ${group.rollupItem.name}`
+              const rollupLabel = rollupLens === '__parent__' ? 'Parent' : (LENSES.find(l => l.key === rollupLens)?.label || rollupLens)
+              rollupHeader.textContent = `${rollupLabel}: ${group.rollupItem.name}`
               svg.appendChild(rollupHeader)
             }
             
@@ -1028,7 +1118,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
 
         // Current column items
         const currentStartX = padding + primaryColWidth + colGap
-        divestItems.forEach((item, itemIdx) => {
+        divestItems.forEach((item: ItemRecord, itemIdx: number) => {
           const col = itemIdx % boxesPerRow
           const row = Math.floor(itemIdx / boxesPerRow)
           const boxX = currentStartX + col * (boxWidth + boxGap)
@@ -1087,7 +1177,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
 
         // Target column items
         const targetStartX = padding + primaryColWidth + colGap + currentColWidth + colGap
-        targetItems.forEach((item, itemIdx) => {
+        targetItems.forEach((item: ItemRecord, itemIdx: number) => {
           const col = itemIdx % boxesPerRow
           const row = Math.floor(itemIdx / boxesPerRow)
           const boxX = targetStartX + col * (boxWidth + boxGap)
@@ -1218,6 +1308,24 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     })
   }, [groupedItemAnalysis])
 
+  // Check if any items have a lifecycleStatus
+  const hasAnyLifecycleStatus = useMemo(() => {
+    if (!itemAnalysis.length) return false
+    return itemAnalysis.some(analysis => {
+      const allItems = [
+        ...(analysis.divestItems || []),
+        ...(analysis.targetItems || []),
+        ...(analysis.rollupGroups?.flatMap((g: any) => [
+          ...(g.divestItems || []), 
+          ...(g.targetItems || []),
+          ...(g.rollupItem ? [g.rollupItem] : [])
+        ]) || []),
+        ...(analysis.ungroupedSecondaryItems || [])
+      ]
+      return allItems.some(item => item && item.lifecycleStatus)
+    })
+  }, [itemAnalysis])
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-4 p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
@@ -1262,10 +1370,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
             <span className="text-xs">Roll-up Lens:</span>
             <select
               value={rollupLens}
-              onChange={e => setRollupLens(e.target.value as LensKey)}
+              onChange={e => setRollupLens(e.target.value as LensKey | '__parent__')}
               className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
             >
               <option value="">No roll-up</option>
+              <option value="__parent__">By Parent</option>
               {lenses.filter(l => l.key !== primaryLens && l.key !== secondaryLens).map(lens => (
                 <option key={lens.key} value={lens.key}>{lens.label}</option>
               ))}
@@ -1276,10 +1385,9 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               <span className="text-xs">Roll-up Mode:</span>
               <select
                 value={rollupMode}
-                onChange={e => setRollupMode(e.target.value as 'none' | 'only-related' | 'show-secondary')}
+                onChange={e => setRollupMode(e.target.value as 'only-related' | 'show-secondary')}
                 className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
               >
-                <option value="none">No roll-up</option>
                 <option value="only-related">Only show roll-ups</option>
                 <option value="show-secondary">Show secondary when not related</option>
               </select>
@@ -1361,16 +1469,24 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           itemAnalysis.length > 0 ? (
             <div ref={contentRef} className="max-w-7xl mx-auto">
               {/* Column headers */}
-              <div className="grid grid-cols-[200px_1fr_1fr] gap-3 mb-2 pb-2 border-b-2 border-slate-300 dark:border-slate-700">
+              <div className={`grid ${hasAnyLifecycleStatus ? 'grid-cols-[200px_1fr_1fr]' : 'grid-cols-[200px_1fr]'} gap-3 mb-2 pb-2 border-b-2 border-slate-300 dark:border-slate-700`}>
                 <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
                   {LENSES.find(l => l.key === primaryLens)?.label || primaryLens}
                 </div>
-                <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
-                  Current
-                </div>
-                <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center ml-12">
-                  Target
-                </div>
+                {hasAnyLifecycleStatus ? (
+                  <>
+                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                      Current
+                    </div>
+                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center ml-12">
+                      Target
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                    {LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens}
+                  </div>
+                )}
               </div>
               
               {/* Rows grouped by parent */}
@@ -1390,12 +1506,41 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                         {groupItems.map((analysis, idx) => {
                           const { primaryItem, divestItems, targetItems, hasRollup, rollupGroups, ungroupedSecondaryItems, itemRelLifecycleMap } = analysis as any
                           
+                          // If no items have lifecycleStatus, use only divestItems (deduplicated) to avoid showing items twice
+                          const allItems = hasAnyLifecycleStatus ? null : (() => {
+                            const itemsMap = new Map<number, ItemRecord>()
+                            ;(divestItems || []).forEach((item: ItemRecord) => {
+                              if (item.id) itemsMap.set(item.id, item)
+                            })
+                            return Array.from(itemsMap.values())
+                          })()
+                          
                           // Render with roll-up grouping if enabled
                           if (hasRollup && rollupGroups) {
+                            // If no lifecycleStatus, use only divestItems from rollupGroups (deduplicated) to avoid showing items twice
+                            // Don't include targetItems in single column mode
+                            const allRollupItems = hasAnyLifecycleStatus ? null : (() => {
+                              const itemsMap = new Map<number, ItemRecord>()
+                              rollupGroups.forEach((g: any) => {
+                                ;(g.divestItems || []).forEach((item: ItemRecord) => {
+                                  if (item && item.id) itemsMap.set(item.id, item)
+                                })
+                              })
+                              // Also include ungrouped items that are in divestItems
+                              if (ungroupedSecondaryItems) {
+                                ungroupedSecondaryItems.forEach((item: ItemRecord) => {
+                                  if (item && item.id && divestItems.includes(item)) {
+                                    itemsMap.set(item.id, item)
+                                  }
+                                })
+                              }
+                              return Array.from(itemsMap.values())
+                            })()
+                            
                             return (
                               <div
                                 key={primaryItem.id}
-                                className={`grid grid-cols-[200px_1fr_1fr] gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
+                                className={`grid ${hasAnyLifecycleStatus ? 'grid-cols-[200px_1fr_1fr]' : 'grid-cols-[200px_1fr]'} gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
                               >
                                 {/* Left: Primary Item Name */}
                                 <div className="flex flex-col justify-start">
@@ -1415,24 +1560,28 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                   )}
                                 </div>
                                 
-                                {/* Middle Column: Current items from all roll-up groups */}
-                                <div>
+                                {hasAnyLifecycleStatus ? (
+                                  <>
+                                    {/* Middle Column: Current items from all roll-up groups */}
+                                    <div>
                                   {/* Roll-up Groups - Current Items */}
                                   <div className="space-y-3">
-                                  {rollupGroups.map((group: any, groupIdx: number) => {
+                                  {rollupGroups.map((group: any) => {
                                     // For "only-related" mode, show roll-up items as boxes instead of secondary items
                                     if (rollupMode === 'only-related') {
                                       const hasCurrentItems = group.divestItems.length > 0
                                       
                                       return (
-                                        <div key={group.rollupItem.id}>
+                                        <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
                                           {hasCurrentItems ? (
                                             <div className="grid grid-cols-3 gap-1">
                                               <div
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
                                                 onClick={() => {
-                                                  setEditItem(group.rollupItem)
-                                                  setEditDialogOpen(true)
+                                                  if (group.rollupItem.id) {
+                                                    setEditItem(group.rollupItem)
+                                                    setEditDialogOpen(true)
+                                                  }
                                                 }}
                                               >
                                                 <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
@@ -1460,14 +1609,16 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       const hasCurrentItems = group.divestItems.length > 0
                                       
                                       return (
-                                        <div key={group.rollupItem.id}>
+                                        <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
                                           {hasCurrentItems ? (
                                             <div className="grid grid-cols-3 gap-1">
                                               <div
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
                                                 onClick={() => {
-                                                  setEditItem(group.rollupItem)
-                                                  setEditDialogOpen(true)
+                                                  if (group.rollupItem.id) {
+                                                    setEditItem(group.rollupItem)
+                                                    setEditDialogOpen(true)
+                                                  }
                                                 }}
                                               >
                                                 <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
@@ -1490,41 +1641,37 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       )
                                     }
                                     
-                                    // For "none" mode (no roll-up), show secondary items as before
+                                    // For "none" mode, show roll-up items as boxes (same as other modes)
+                                    // This applies to both regular roll-up lenses and parent-based roll-up
+                                    const hasCurrentItems = group.divestItems.length > 0
+                                    
                                     return (
-                                      <div key={group.rollupItem.id}>
-                                        {/* Roll-up Item Header */}
-                                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                                          {LENSES.find(l => l.key === rollupLens)?.label || rollupLens}: {group.rollupItem.name}
-                                        </div>
-                                        
-                                        {/* Current items for this roll-up group */}
-                                        {group.divestItems.length > 0 ? (
+                                      <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
+                                        {hasCurrentItems ? (
                                           <div className="grid grid-cols-3 gap-1">
-                                            {group.divestItems.map((item: ItemRecord) => (
-                                              <div
-                                                key={item.id}
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
-                                                onClick={() => {
-                                                  setEditItem(item)
+                                            <div
+                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                              onClick={() => {
+                                                if (group.rollupItem.id) {
+                                                  setEditItem(group.rollupItem)
                                                   setEditDialogOpen(true)
-                                                }}
-                                              >
-                                                <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                                  {item.name}
-                                                </div>
-                                                {minorTextOption === 'description' && item.description && (
-                                                  <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                    {item.description}
-                                                  </div>
-                                                )}
-                                                {minorTextOption === 'lifecycle' && (
-                                                  <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                                    {getLifecycleLabel(item.lifecycleStatus)}
-                                                  </div>
-                                                )}
+                                                }
+                                              }}
+                                            >
+                                              <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                                {group.rollupItem.name}
                                               </div>
-                                            ))}
+                                              {minorTextOption === 'description' && group.rollupItem.description && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {group.rollupItem.description}
+                                                </div>
+                                              )}
+                                              {minorTextOption === 'lifecycle' && (
+                                                <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                                  {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
+                                                </div>
+                                              )}
+                                            </div>
                                           </div>
                                         ) : null}
                                       </div>
@@ -1601,28 +1748,30 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       ) : null}
                                     </div>
                                   )}
-                                  </div>
-                                </div>
-                                
-                                {/* Right Column: Target items from all roll-up groups */}
-                                <div className="ml-12">
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Right Column: Target items from all roll-up groups */}
+                                    <div className="ml-12">
                                   {/* Roll-up Groups - Target Items */}
                                   <div className="space-y-3">
-                                  {rollupGroups.map((group: any, groupIdx: number) => {
+                                  {rollupGroups.map((group: any) => {
                                     // For "only-related" mode, show roll-up items as boxes instead of secondary items
                                     if (rollupMode === 'only-related') {
                                       const hasTargetItemsInGroup = group.targetItems.length > 0
                                       const hasTargetItemsOverall = targetItems.length > 0
                                       
                                       return (
-                                        <div key={group.rollupItem.id}>
+                                        <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
                                           {hasTargetItemsInGroup ? (
                                             <div className="grid grid-cols-3 gap-1">
                                               <div
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
                                                 onClick={() => {
-                                                  setEditItem(group.rollupItem)
-                                                  setEditDialogOpen(true)
+                                                  if (group.rollupItem.id) {
+                                                    setEditItem(group.rollupItem)
+                                                    setEditDialogOpen(true)
+                                                  }
                                                 }}
                                               >
                                                 <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
@@ -1644,10 +1793,10 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                             null
                                           ) : (
                                             <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
-                                              No replacement items for {primaryItem.name}
+                                              No Target items for {primaryItem.name}
                                               {group.divestItems.length > 0 && (
                                                 <div className="mt-1 text-[10px]">
-                                                  Current: {group.divestItems.map(item => item.name).join(', ')}
+                                                  Current: {group.divestItems.map((item: ItemRecord) => item.name).join(', ')}
                                                 </div>
                                               )}
                                             </div>
@@ -1662,14 +1811,16 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       const hasTargetItemsOverall = targetItems.length > 0
                                       
                                       return (
-                                        <div key={group.rollupItem.id}>
+                                        <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
                                           {hasTargetItemsInGroup ? (
                                             <div className="grid grid-cols-3 gap-1">
                                               <div
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
                                                 onClick={() => {
-                                                  setEditItem(group.rollupItem)
-                                                  setEditDialogOpen(true)
+                                                  if (group.rollupItem.id) {
+                                                    setEditItem(group.rollupItem)
+                                                    setEditDialogOpen(true)
+                                                  }
                                                 }}
                                               >
                                                 <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
@@ -1691,10 +1842,10 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                             null
                                           ) : (
                                             <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
-                                              No replacement items for {primaryItem.name}
+                                              No Target items for {primaryItem.name}
                                               {group.divestItems.length > 0 && (
                                                 <div className="mt-1 text-[10px]">
-                                                  Current: {group.divestItems.map(item => item.name).join(', ')}
+                                                  Current: {group.divestItems.map((item: ItemRecord) => item.name).join(', ')}
                                                 </div>
                                               )}
                                             </div>
@@ -1703,41 +1854,43 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       )
                                     }
                                     
-                                    // For "none" mode (no roll-up), show secondary items as before
+                                    // For "none" mode, show roll-up items as boxes (same as other modes)
+                                    const hasTargetItemsInGroup = group.targetItems.length > 0
+                                    const hasTargetItemsOverall = targetItems.length > 0
+                                    
                                     return (
-                                      <div key={group.rollupItem.id}>
-                                        {group.targetItems.length > 0 ? (
+                                      <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
+                                        {hasTargetItemsInGroup ? (
                                           <div className="grid grid-cols-3 gap-1">
-                                            {group.targetItems.map((item: ItemRecord) => (
-                                              <div
-                                                key={item.id}
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
-                                                onClick={() => {
-                                                  setEditItem(item)
+                                            <div
+                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                              onClick={() => {
+                                                if (group.rollupItem.id) {
+                                                  setEditItem(group.rollupItem)
                                                   setEditDialogOpen(true)
-                                                }}
-                                              >
-                                                <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                                  {item.name}
-                                                </div>
-                                                {minorTextOption === 'description' && item.description && (
-                                                  <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                    {item.description}
-                                                  </div>
-                                                )}
-                                                {minorTextOption === 'lifecycle' && (
-                                                  <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                                    {getLifecycleLabel(item.lifecycleStatus)}
-                                                  </div>
-                                                )}
+                                                }
+                                              }}
+                                            >
+                                              <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                                {group.rollupItem.name}
                                               </div>
-                                            ))}
+                                              {minorTextOption === 'description' && group.rollupItem.description && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {group.rollupItem.description}
+                                                </div>
+                                              )}
+                                              {minorTextOption === 'lifecycle' && (
+                                                <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                                  {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
+                                                </div>
+                                              )}
+                                            </div>
                                           </div>
-                                        ) : targetItems.length > 0 ? (
+                                        ) : hasTargetItemsOverall ? (
                                           null
                                         ) : (
                                           <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
-                                            No replacement items for {primaryItem.name}
+                                            No Target items for {primaryItem.name}
                                             {group.divestItems.length > 0 && (
                                               <div className="mt-1 text-[10px]">
                                                 Current: {group.divestItems.map((item: ItemRecord) => item.name).join(', ')}
@@ -1822,7 +1975,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         null
                                       ) : (
                                         <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
-                                          No replacement items for {primaryItem.name}
+                                          No Target items for {primaryItem.name}
                                           {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).length > 0 && (
                                             <div className="mt-1 text-[10px]">
                                               Current: {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).map((item: ItemRecord) => item.name).join(', ')}
@@ -1834,6 +1987,81 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                   )}
                                   </div>
                                 </div>
+                                  </>
+                                ) : (
+                                  /* Single Column: All items from roll-up groups when no lifecycleStatus */
+                                  <div>
+                                    {allRollupItems && allRollupItems.length > 0 ? (
+                                      <div className="space-y-3">
+                                        {rollupGroups.map((group: any) => (
+                                          <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
+                                            {(group.divestItems || []).length > 0 ? (
+                                              <div className="grid grid-cols-3 gap-1">
+                                                <div
+                                                  className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                                  onClick={() => {
+                                                    if (group.rollupItem.id) {
+                                                      setEditItem(group.rollupItem)
+                                                      setEditDialogOpen(true)
+                                                    }
+                                                  }}
+                                                >
+                                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                                    {group.rollupItem.name}
+                                                  </div>
+                                                  {minorTextOption === 'description' && group.rollupItem.description && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {group.rollupItem.description}
+                                                    </div>
+                                                  )}
+                                                  {minorTextOption === 'lifecycle' && (
+                                                    <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                                      {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        ))}
+                                        {ungroupedSecondaryItems && ungroupedSecondaryItems.length > 0 && (
+                                          <div className={rollupGroups.length > 0 ? 'mt-3' : ''}>
+                                            <div className="grid grid-cols-3 gap-1">
+                                              {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).map((item: ItemRecord) => (
+                                                <div
+                                                  key={item.id}
+                                                  className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                                  onClick={() => {
+                                                    setEditItem(item)
+                                                    setEditDialogOpen(true)
+                                                  }}
+                                                >
+                                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                                    {item.name}
+                                                  </div>
+                                                  {minorTextOption === 'description' && item.description && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {item.description}
+                                                    </div>
+                                                  )}
+                                                  {minorTextOption === 'lifecycle' && (
+                                                    <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                                      {getLifecycleLabel(item.lifecycleStatus)}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                        No items
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )
                           }
@@ -1842,7 +2070,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                           return (
                             <div
                               key={primaryItem.id}
-                              className={`grid grid-cols-[200px_1fr_1fr] gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
+                              className={`grid ${hasAnyLifecycleStatus ? 'grid-cols-[200px_1fr_1fr]' : 'grid-cols-[200px_1fr]'} gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
                             >
                               {/* Left: Primary Item Name */}
                               <div className="flex flex-col justify-start">
@@ -1862,82 +2090,122 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                 )}
                               </div>
                               
-                              {/* Middle Column: Current (Invest items with relationship lifecycle None or Divest) */}
-                              <div>
-                                {divestItems.length > 0 ? (
-                                  <div className="grid grid-cols-3 gap-1">
-                                    {divestItems.map(item => (
-                                      <div
-                                        key={item.id}
-                                        className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
-                                        onClick={() => {
-                                          setEditItem(item)
-                                          setEditDialogOpen(true)
-                                        }}
-                                      >
-                                        <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                          {item.name}
-                                        </div>
-                                        {minorTextOption === 'description' && item.description && (
-                                          <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                            {item.description}
+                              {hasAnyLifecycleStatus ? (
+                                <>
+                                  {/* Middle Column: Current (Invest items with relationship lifecycle None or Divest) */}
+                                  <div>
+                                    {divestItems.length > 0 ? (
+                                      <div className="grid grid-cols-3 gap-1">
+                                        {divestItems.map((item: ItemRecord) => (
+                                          <div
+                                            key={item.id}
+                                            className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                            onClick={() => {
+                                              setEditItem(item)
+                                              setEditDialogOpen(true)
+                                            }}
+                                          >
+                                            <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                              {item.name}
+                                            </div>
+                                            {minorTextOption === 'description' && item.description && (
+                                              <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                {item.description}
+                                              </div>
+                                            )}
+                                            {minorTextOption === 'lifecycle' && (
+                                              <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                                {getLifecycleLabel(item.lifecycleStatus)}
+                                              </div>
+                                            )}
                                           </div>
-                                        )}
-                                        {minorTextOption === 'lifecycle' && (
-                                          <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                            {getLifecycleLabel(item.lifecycleStatus)}
-                                          </div>
-                                        )}
+                                        ))}
                                       </div>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
-                                    No items in Current column
-                                  </div>
-                                )}
-                              </div>
-                              
-                              {/* Right Column: Target (Replacement Items + Other Items + No Status) */}
-                              <div className="ml-12">
-                                {targetItems.length > 0 ? (
-                                  <div className="grid grid-cols-3 gap-1">
-                                    {targetItems.map(item => (
-                                      <div
-                                        key={item.id}
-                                        className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
-                                        onClick={() => {
-                                          setEditItem(item)
-                                          setEditDialogOpen(true)
-                                        }}
-                                      >
-                                        <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                          {item.name}
-                                        </div>
-                                        {minorTextOption === 'description' && item.description && (
-                                          <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                            {item.description}
-                                          </div>
-                                        )}
-                                        {minorTextOption === 'lifecycle' && (
-                                          <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                            {getLifecycleLabel(item.lifecycleStatus)}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
-                                    No replacement items for {primaryItem.name}
-                                    {divestItems.length > 0 && (
-                                      <div className="mt-1 text-[10px]">
-                                        Current: {divestItems.map(item => item.name).join(', ')}
+                                    ) : (
+                                      <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                        No items in Current column
                                       </div>
                                     )}
                                   </div>
-                                )}
-                              </div>
+                                  
+                                  {/* Right Column: Target (Replacement Items + Other Items + No Status) */}
+                                  <div className="ml-12">
+                                    {targetItems.length > 0 ? (
+                                      <div className="grid grid-cols-3 gap-1">
+                                        {targetItems.map((item: ItemRecord) => (
+                                          <div
+                                            key={item.id}
+                                            className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                            onClick={() => {
+                                              setEditItem(item)
+                                              setEditDialogOpen(true)
+                                            }}
+                                          >
+                                            <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                              {item.name}
+                                            </div>
+                                            {minorTextOption === 'description' && item.description && (
+                                              <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                {item.description}
+                                              </div>
+                                            )}
+                                            {minorTextOption === 'lifecycle' && (
+                                              <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                                {getLifecycleLabel(item.lifecycleStatus)}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                        No Target items for {primaryItem.name}
+                                        {divestItems.length > 0 && (
+                                          <div className="mt-1 text-[10px]">
+                                            Current: {divestItems.map((item: ItemRecord) => item.name).join(', ')}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </>
+                              ) : (
+                                /* Single Column: All items when no lifecycleStatus */
+                                <div>
+                                  {allItems && allItems.length > 0 ? (
+                                    <div className="grid grid-cols-3 gap-1">
+                                      {allItems.map((item: ItemRecord) => (
+                                        <div
+                                          key={item.id}
+                                          className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                          onClick={() => {
+                                            setEditItem(item)
+                                            setEditDialogOpen(true)
+                                          }}
+                                        >
+                                          <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                            {item.name}
+                                          </div>
+                                          {minorTextOption === 'description' && item.description && (
+                                            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                              {item.description}
+                                            </div>
+                                          )}
+                                          {minorTextOption === 'lifecycle' && (
+                                            <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                              {getLifecycleLabel(item.lifecycleStatus)}
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                      No items
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )
                         })}

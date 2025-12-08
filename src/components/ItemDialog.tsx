@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { db, getAllItemNames, getAllPeopleNames } from '../db'
+import { useEffect, useState } from 'react'
+import { db, getAllItemNames, getAllPeopleNames, getAllLenses } from '../db'
 import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type MeetingNote, type Hyperlink, type Task } from '../types'
 import { Modal } from './Modal'
 import { AutocompleteInput } from './AutocompleteInput'
@@ -34,6 +34,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
   const [allItems, setAllItems] = useState<ItemRecord[]>([]) // For parent autocomplete
   const [peopleNames, setPeopleNames] = useState<string[]>([]) // For people autocomplete
   const [managerNames, setManagerNames] = useState<string[]>([]) // For architecture manager autocomplete
+  const [lensOptions, setLensOptions] = useState<Array<{ key: LensKey; label: string }>>([]) // For target lens dropdown
 
   // Relationships (outgoing from this item)
   const [rels, setRels] = useState<RelationshipRecord[]>([])
@@ -185,14 +186,24 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
       })
       setManagerNames(Array.from(managers).sort())
     }
+    async function loadLenses() {
+      try {
+        const lenses = await getAllLenses()
+        setLensOptions(lenses.map(l => ({ key: l.key, label: l.label })))
+      } catch (error) {
+        console.error('Error loading lenses:', error)
+        // Fallback to static LENSES if database fails
+        setLensOptions(LENSES.map(l => ({ key: l.key, label: l.label })))
+      }
+    }
     if (open) {
       loadAllItems()
       loadPeopleNames()
       loadManagerNames()
+      loadLenses()
     }
   }, [open])
 
-  const lensOptions = useMemo(() => LENSES, [])
   const [targetLens, setTargetLens] = useState<LensKey>('channels')
   const [targetQuery, setTargetQuery] = useState('')
   const [targetItems, setTargetItems] = useState<ItemRecord[]>([])
@@ -528,7 +539,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
             <div>
               <label className="block text-xs mb-1">Target lens</label>
               <select value={targetLens} onChange={e => setTargetLens(e.target.value as LensKey)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700">
-                {lensOptions.map(o => (
+                {lensOptions.map((o: { key: LensKey; label: string }) => (
                   <option key={o.key} value={o.key}>{o.label}</option>
                 ))}
               </select>

@@ -51,6 +51,12 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
   })
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editItem, setEditItem] = useState<ItemRecord | null>(null)
+  const [hoveredItemId, setHoveredItemId] = useState<number | null>(null)
+  const [hoveredParentName, setHoveredParentName] = useState<string | null>(null)
+  const [columnViewMode, setColumnViewMode] = useState<'both' | 'current' | 'target'>(() => {
+    const saved = localStorage.getItem('divest-replacement-column-view-mode')
+    return (saved === 'both' || saved === 'current' || saved === 'target') ? saved : 'both'
+  })
   const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -103,6 +109,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     localStorage.setItem('divest-replacement-rollup-mode', rollupMode)
   }, [rollupMode])
 
+  // Persist column view mode to localStorage
+  useEffect(() => {
+    localStorage.setItem('divest-replacement-column-view-mode', columnViewMode)
+  }, [columnViewMode])
+
   async function loadData() {
     const [allLenses, allItems, allRels] = await Promise.all([
       getAllLenses(),
@@ -143,6 +154,12 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
             relatedItemIds.add(rel.fromItemId)
           }
         })
+        
+        // If the filter item is in the primary lens, include it in the results
+        // This ensures the selected primary item is shown even if it has no relationships
+        if (filterItem.lens === primaryLens) {
+          relatedItemIds.add(filterItemId)
+        }
         
         filtered = filtered.filter(item => relatedItemIds.has(item.id!))
       }
@@ -473,13 +490,133 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     return 'bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-700'
   }
 
+  // Get outline color matching the border color for highlighted items
+  const getOutlineColor = (status?: LifecycleStatus): string => {
+    if (status === 'Divest') {
+      return 'outline-red-300 dark:outline-red-700'
+    }
+    if (!status) {
+      return 'outline-gray-300 dark:outline-gray-700'
+    }
+    return 'outline-blue-300 dark:outline-blue-700'
+  }
+
   const getLifecycleLabel = (status?: LifecycleStatus): string => {
     return status || 'No Status'
+  }
+
+  // Get related item IDs for a given item (bidirectional relationships)
+  const getRelatedItemIds = (itemId: number): Set<number> => {
+    const relatedIds = new Set<number>()
+    relationships.forEach(rel => {
+      if (rel.fromItemId === itemId) {
+        relatedIds.add(rel.toItemId)
+      } else if (rel.toItemId === itemId) {
+        relatedIds.add(rel.fromItemId)
+      }
+    })
+    return relatedIds
+  }
+
+  // Check if an item should be highlighted (by ID or parent name)
+  const shouldHighlightItem = (item: ItemRecord): boolean => {
+    // Check if item itself is hovered
+    if (hoveredItemId === item.id) return true
+    
+    // Check if item's parent is hovered
+    if (hoveredParentName !== null && item.parent === hoveredParentName) return true
+    
+    // Check if item is related to hovered item
+    if (hoveredItemId !== null) {
+      const relatedIds = getRelatedItemIds(hoveredItemId)
+      if (item.id && relatedIds.has(item.id)) return true
+    }
+    
+    return false
+  }
+
+  // Get the hovered item's lifecycle status for background color matching
+  const getHoveredItemStatus = (): LifecycleStatus | undefined => {
+    if (hoveredItemId !== null) {
+      const hoveredItem = items.find(item => item.id === hoveredItemId)
+      return hoveredItem?.lifecycleStatus
+    }
+    return undefined
+  }
+
+  // Get background color for highlighted items (use hovered item's color if related)
+  const getHighlightedItemColor = (item: ItemRecord): string => {
+    const isHighlighted = shouldHighlightItem(item)
+    if (!isHighlighted) {
+      return getInnerBoxColor(item.lifecycleStatus)
+    }
+    
+    // If this is the hovered item itself, use its own color
+    if (hoveredItemId === item.id) {
+      return getInnerBoxColor(item.lifecycleStatus)
+    }
+    
+    // If parent name is hovered, use gray background for related items
+    if (hoveredParentName !== null && item.parent === hoveredParentName) {
+      return getInnerBoxColor(undefined) // Gray for no status
+    }
+    
+    // If this is a related item, use the hovered item's color
+    const hoveredStatus = getHoveredItemStatus()
+    return getInnerBoxColor(hoveredStatus)
+  }
+
+  // Get opacity class for hovered and highlighted items
+  const getOpacityClass = (item: ItemRecord): string => {
+    const isHighlighted = shouldHighlightItem(item)
+    if (isHighlighted) {
+      return 'opacity-80'
+    }
+    return ''
+  }
+
+  // Get opacity class for rollup items (can be item with id or parent name)
+  const getRollupItemOpacityClass = (rollupItem: any): string => {
+    if (rollupItem.id) {
+      // It's an actual item - check if it should be highlighted
+      const item = items.find(i => i.id === rollupItem.id)
+      if (item) {
+        return getOpacityClass(item)
+      }
+    } else {
+      // It's a parent name - check if this parent is hovered
+      if (hoveredParentName === rollupItem.name) {
+        return 'opacity-80'
+      }
+    }
+    return ''
   }
 
   // Export as SVG
   function handleExportSVG() {
     if (!contentRef.current || !primaryLens || !secondaryLens || itemAnalysis.length === 0) return
+
+    // Helper function to wrap text for SVG
+    function wrapText(text: string, maxWidth: number, fontSize: number = 10): string[] {
+      if (!text) return []
+      const words = text.split(' ')
+      const lines: string[] = []
+      let currentLine = ''
+      
+      words.forEach(word => {
+        const testLine = currentLine ? `${currentLine} ${word}` : word
+        // Approximate width: ~0.6 * fontSize per character
+        const width = testLine.length * fontSize * 0.6
+        if (width > maxWidth && currentLine) {
+          lines.push(currentLine)
+          currentLine = word
+        } else {
+          currentLine = testLine
+        }
+      })
+      if (currentLine) lines.push(currentLine)
+      return lines.length > 0 ? lines : [text]
+    }
 
     // Calculate dimensions
     const padding = 20
@@ -495,6 +632,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     const boxesPerRow = 3
     const boxGap = 4
 
+    // Determine which columns to show based on columnViewMode
+    const showCurrent = columnViewMode === 'both' || columnViewMode === 'current'
+    const showTarget = columnViewMode === 'both' || columnViewMode === 'target'
+    
+    // Adjust column widths for single column mode (use full width)
+    const effectiveCurrentColWidth = showCurrent && showTarget ? currentColWidth : (showCurrent ? currentColWidth + targetColWidth + colGap : 0)
+    const effectiveTargetColWidth = showCurrent && showTarget ? targetColWidth : (showTarget ? currentColWidth + targetColWidth + colGap : 0)
+
     // Calculate total height (no title, so start at header)
     let calculatedHeight = padding + headerHeight
     sortedParents.forEach(parent => {
@@ -506,22 +651,25 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
         const { divestItems, targetItems, hasRollup, rollupGroups, ungroupedSecondaryItems } = analysis
         if (hasRollup && rollupGroups) {
           rollupGroups.forEach((group: any) => {
-            const maxItems = Math.max(group.divestItems.length, group.targetItems.length)
+            const currentItems = showCurrent ? group.divestItems.length : 0
+            const targetItemsCount = showTarget ? group.targetItems.length : 0
+            const maxItems = Math.max(currentItems, targetItemsCount)
             const numRows = Math.ceil(maxItems / boxesPerRow)
             const rowHeightForItem = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight) + 20
             calculatedHeight += rowHeightForItem + rowGap
           })
           if (ungroupedSecondaryItems && ungroupedSecondaryItems.length > 0) {
-            const maxItems = Math.max(
-              ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).length,
-              ungroupedSecondaryItems.filter((item: ItemRecord) => targetItems.includes(item)).length
-            )
+            const currentItems = showCurrent ? ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).length : 0
+            const targetItemsCount = showTarget ? ungroupedSecondaryItems.filter((item: ItemRecord) => targetItems.includes(item)).length : 0
+            const maxItems = Math.max(currentItems, targetItemsCount)
             const numRows = Math.ceil(maxItems / boxesPerRow)
             const rowHeightForItem = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight) + 20
             calculatedHeight += rowHeightForItem + rowGap
           }
         } else {
-          const maxItems = Math.max(divestItems.length, targetItems.length)
+          const currentItems = showCurrent ? divestItems.length : 0
+          const targetItemsCount = showTarget ? targetItems.length : 0
+          const maxItems = Math.max(currentItems, targetItemsCount)
           const numRows = Math.ceil(maxItems / boxesPerRow)
           const rowHeightForItem = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight)
           calculatedHeight += rowHeightForItem + rowGap
@@ -529,7 +677,16 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       })
     })
 
-    const totalWidth = padding + primaryColWidth + colGap + currentColWidth + colGap + targetColWidth + padding
+    // Calculate total width based on visible columns
+    let totalWidth = padding + primaryColWidth
+    if (showCurrent && showTarget) {
+      totalWidth += colGap + currentColWidth + colGap + targetColWidth
+    } else if (showCurrent) {
+      totalWidth += colGap + effectiveCurrentColWidth
+    } else if (showTarget) {
+      totalWidth += colGap + effectiveTargetColWidth
+    }
+    totalWidth += padding
     const initialHeight = calculatedHeight + padding
 
     // Create SVG
@@ -576,21 +733,31 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     primaryLabel.textContent = LENSES.find(l => l.key === primaryLens)?.label || primaryLens
     svg.appendChild(primaryLabel)
 
-    const currentLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-    currentLabel.setAttribute('x', String(padding + primaryColWidth + colGap + currentColWidth / 2))
-    currentLabel.setAttribute('y', String(headerY - 10))
-    currentLabel.setAttribute('class', 'header')
-    currentLabel.setAttribute('text-anchor', 'middle')
-    currentLabel.textContent = 'Current'
-    svg.appendChild(currentLabel)
+    if (showCurrent) {
+      const currentLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+      const currentLabelX = showCurrent && showTarget 
+        ? padding + primaryColWidth + colGap + currentColWidth / 2
+        : padding + primaryColWidth + colGap + effectiveCurrentColWidth / 2
+      currentLabel.setAttribute('x', String(currentLabelX))
+      currentLabel.setAttribute('y', String(headerY - 10))
+      currentLabel.setAttribute('class', 'header')
+      currentLabel.setAttribute('text-anchor', 'middle')
+      currentLabel.textContent = 'Current'
+      svg.appendChild(currentLabel)
+    }
 
-    const targetLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-    targetLabel.setAttribute('x', String(padding + primaryColWidth + colGap + currentColWidth + colGap + targetColWidth / 2))
-    targetLabel.setAttribute('y', String(headerY - 10))
-    targetLabel.setAttribute('class', 'header')
-    targetLabel.setAttribute('text-anchor', 'middle')
-    targetLabel.textContent = 'Target'
-    svg.appendChild(targetLabel)
+    if (showTarget) {
+      const targetLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+      const targetLabelX = showCurrent && showTarget
+        ? padding + primaryColWidth + colGap + currentColWidth + colGap + targetColWidth / 2
+        : padding + primaryColWidth + colGap + effectiveTargetColWidth / 2
+      targetLabel.setAttribute('x', String(targetLabelX))
+      targetLabel.setAttribute('y', String(headerY - 10))
+      targetLabel.setAttribute('class', 'header')
+      targetLabel.setAttribute('text-anchor', 'middle')
+      targetLabel.textContent = 'Target'
+      svg.appendChild(targetLabel)
+    }
 
     // Draw items
     let currentY = headerY + padding + rowGap
@@ -683,8 +850,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               }
               
               // Draw roll-up item in Current column if it has current items
-              const currentStartX = padding + primaryColWidth + colGap
-              if (hasCurrentItems) {
+              const currentStartX = showCurrent ? padding + primaryColWidth + colGap : 0
+              if (showCurrent && hasCurrentItems) {
                 const boxX = currentStartX
                 const boxY = rowY + 20
 
@@ -708,40 +875,48 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 box.setAttribute('stroke-width', '1')
                 svg.appendChild(box)
 
-                // Item name
-                const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                itemName.setAttribute('x', String(boxX + boxWidth / 2))
-                itemName.setAttribute('y', String(boxY + 15))
-                itemName.setAttribute('class', 'item-name')
-                itemName.setAttribute('text-anchor', 'middle')
-                const nameText = group.rollupItem.name.length > 15 ? group.rollupItem.name.substring(0, 15) + '...' : group.rollupItem.name
-                itemName.textContent = nameText
-                svg.appendChild(itemName)
+                // Item name (wrapped)
+                const nameLines = wrapText(group.rollupItem.name, boxWidth - 8, 10)
+                nameLines.forEach((line, idx) => {
+                  const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                  itemName.setAttribute('x', String(boxX + boxWidth / 2))
+                  itemName.setAttribute('y', String(boxY + 12 + idx * 11))
+                  itemName.setAttribute('class', 'item-name')
+                  itemName.setAttribute('text-anchor', 'middle')
+                  itemName.textContent = line
+                  svg.appendChild(itemName)
+                })
 
                 // Minor text
                 if (minorTextOption === 'lifecycle') {
                   const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
                   minor.setAttribute('x', String(boxX + boxWidth / 2))
-                  minor.setAttribute('y', String(boxY + 28))
+                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4))
                   minor.setAttribute('class', 'item-minor')
                   minor.setAttribute('text-anchor', 'middle')
                   minor.textContent = getLifecycleLabel(group.rollupItem.lifecycleStatus)
                   svg.appendChild(minor)
                 } else if (minorTextOption === 'description' && group.rollupItem.description) {
-                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                  minor.setAttribute('x', String(boxX + boxWidth / 2))
-                  minor.setAttribute('y', String(boxY + 28))
-                  minor.setAttribute('class', 'item-minor')
-                  minor.setAttribute('text-anchor', 'middle')
-                  const descText = group.rollupItem.description.length > 20 ? group.rollupItem.description.substring(0, 20) + '...' : group.rollupItem.description
-                  minor.textContent = descText
-                  svg.appendChild(minor)
+                  const descLines = wrapText(group.rollupItem.description, boxWidth - 8, 8)
+                  descLines.forEach((line, idx) => {
+                    const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                    minor.setAttribute('x', String(boxX + boxWidth / 2))
+                    minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                    minor.setAttribute('class', 'item-minor')
+                    minor.setAttribute('text-anchor', 'middle')
+                    minor.textContent = line
+                    svg.appendChild(minor)
+                  })
                 }
               }
               
               // Draw roll-up item in Target column if it has target items
-              const targetStartX = padding + primaryColWidth + colGap + currentColWidth + colGap
-              if (hasTargetItems) {
+              const targetStartX = showTarget 
+                ? (showCurrent 
+                  ? padding + primaryColWidth + colGap + currentColWidth + colGap
+                  : padding + primaryColWidth + colGap)
+                : 0
+              if (showTarget && hasTargetItems) {
                 const boxX = targetStartX
                 const boxY = rowY + 20
 
@@ -765,34 +940,38 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 box.setAttribute('stroke-width', '1')
                 svg.appendChild(box)
 
-                // Item name
-                const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                itemName.setAttribute('x', String(boxX + boxWidth / 2))
-                itemName.setAttribute('y', String(boxY + 15))
-                itemName.setAttribute('class', 'item-name')
-                itemName.setAttribute('text-anchor', 'middle')
-                const nameText = group.rollupItem.name.length > 15 ? group.rollupItem.name.substring(0, 15) + '...' : group.rollupItem.name
-                itemName.textContent = nameText
-                svg.appendChild(itemName)
+                // Item name (wrapped)
+                const nameLines = wrapText(group.rollupItem.name, boxWidth - 8, 10)
+                nameLines.forEach((line, idx) => {
+                  const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                  itemName.setAttribute('x', String(boxX + boxWidth / 2))
+                  itemName.setAttribute('y', String(boxY + 12 + idx * 11))
+                  itemName.setAttribute('class', 'item-name')
+                  itemName.setAttribute('text-anchor', 'middle')
+                  itemName.textContent = line
+                  svg.appendChild(itemName)
+                })
 
                 // Minor text
                 if (minorTextOption === 'lifecycle') {
                   const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
                   minor.setAttribute('x', String(boxX + boxWidth / 2))
-                  minor.setAttribute('y', String(boxY + 28))
+                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4))
                   minor.setAttribute('class', 'item-minor')
                   minor.setAttribute('text-anchor', 'middle')
                   minor.textContent = getLifecycleLabel(group.rollupItem.lifecycleStatus)
                   svg.appendChild(minor)
                 } else if (minorTextOption === 'description' && group.rollupItem.description) {
-                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                  minor.setAttribute('x', String(boxX + boxWidth / 2))
-                  minor.setAttribute('y', String(boxY + 28))
-                  minor.setAttribute('class', 'item-minor')
-                  minor.setAttribute('text-anchor', 'middle')
-                  const descText = group.rollupItem.description.length > 20 ? group.rollupItem.description.substring(0, 20) + '...' : group.rollupItem.description
-                  minor.textContent = descText
-                  svg.appendChild(minor)
+                  const descLines = wrapText(group.rollupItem.description, boxWidth - 8, 8)
+                  descLines.forEach((line, idx) => {
+                    const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                    minor.setAttribute('x', String(boxX + boxWidth / 2))
+                    minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                    minor.setAttribute('class', 'item-minor')
+                    minor.setAttribute('text-anchor', 'middle')
+                    minor.textContent = line
+                    svg.appendChild(minor)
+                  })
                 }
               }
               
@@ -844,8 +1023,9 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
             }
             
             // Draw items for this roll-up group
-            const currentStartX = padding + primaryColWidth + colGap
-            group.divestItems.forEach((item: ItemRecord, itemIdx: number) => {
+            if (showCurrent) {
+              const currentStartX = padding + primaryColWidth + colGap
+              group.divestItems.forEach((item: ItemRecord, itemIdx: number) => {
               const col = itemIdx % boxesPerRow
               const row = Math.floor(itemIdx / boxesPerRow)
               const boxX = currentStartX + col * (boxWidth + boxGap)
@@ -871,40 +1051,48 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               box.setAttribute('stroke-width', '1')
               svg.appendChild(box)
 
-              // Item name
-              const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-              itemName.setAttribute('x', String(boxX + boxWidth / 2))
-              itemName.setAttribute('y', String(boxY + 15))
-              itemName.setAttribute('class', 'item-name')
-              itemName.setAttribute('text-anchor', 'middle')
-              const nameText = item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name
-              itemName.textContent = nameText
-              svg.appendChild(itemName)
+              // Item name (wrapped)
+              const nameLines = wrapText(item.name, boxWidth - 8, 10)
+              nameLines.forEach((line, idx) => {
+                const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                itemName.setAttribute('x', String(boxX + boxWidth / 2))
+                itemName.setAttribute('y', String(boxY + 12 + idx * 11))
+                itemName.setAttribute('class', 'item-name')
+                itemName.setAttribute('text-anchor', 'middle')
+                itemName.textContent = line
+                svg.appendChild(itemName)
+              })
 
               // Minor text
               if (minorTextOption === 'lifecycle') {
                 const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
                 minor.setAttribute('x', String(boxX + boxWidth / 2))
-                minor.setAttribute('y', String(boxY + 28))
+                minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4))
                 minor.setAttribute('class', 'item-minor')
                 minor.setAttribute('text-anchor', 'middle')
                 minor.textContent = getLifecycleLabel(item.lifecycleStatus)
                 svg.appendChild(minor)
               } else if (minorTextOption === 'description' && item.description) {
-                const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                minor.setAttribute('x', String(boxX + boxWidth / 2))
-                minor.setAttribute('y', String(boxY + 28))
-                minor.setAttribute('class', 'item-minor')
-                minor.setAttribute('text-anchor', 'middle')
-                const descText = item.description.length > 20 ? item.description.substring(0, 20) + '...' : item.description
-                minor.textContent = descText
-                svg.appendChild(minor)
+                const descLines = wrapText(item.description, boxWidth - 8, 8)
+                descLines.forEach((line, idx) => {
+                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                  minor.setAttribute('x', String(boxX + boxWidth / 2))
+                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                  minor.setAttribute('class', 'item-minor')
+                  minor.setAttribute('text-anchor', 'middle')
+                  minor.textContent = line
+                  svg.appendChild(minor)
+                })
               }
             })
+            }
             
             // Target column items
-            const targetStartX = padding + primaryColWidth + colGap + currentColWidth + colGap
-            group.targetItems.forEach((item: ItemRecord, itemIdx: number) => {
+            if (showTarget) {
+              const targetStartX = showCurrent 
+                ? padding + primaryColWidth + colGap + currentColWidth + colGap
+                : padding + primaryColWidth + colGap
+              group.targetItems.forEach((item: ItemRecord, itemIdx: number) => {
               const col = itemIdx % boxesPerRow
               const row = Math.floor(itemIdx / boxesPerRow)
               const boxX = targetStartX + col * (boxWidth + boxGap)
@@ -930,36 +1118,41 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               box.setAttribute('stroke-width', '1')
               svg.appendChild(box)
 
-              // Item name
-              const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-              itemName.setAttribute('x', String(boxX + boxWidth / 2))
-              itemName.setAttribute('y', String(boxY + 15))
-              itemName.setAttribute('class', 'item-name')
-              itemName.setAttribute('text-anchor', 'middle')
-              const nameText = item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name
-              itemName.textContent = nameText
-              svg.appendChild(itemName)
+              // Item name (wrapped)
+              const nameLines = wrapText(item.name, boxWidth - 8, 10)
+              nameLines.forEach((line, idx) => {
+                const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                itemName.setAttribute('x', String(boxX + boxWidth / 2))
+                itemName.setAttribute('y', String(boxY + 12 + idx * 11))
+                itemName.setAttribute('class', 'item-name')
+                itemName.setAttribute('text-anchor', 'middle')
+                itemName.textContent = line
+                svg.appendChild(itemName)
+              })
 
               // Minor text
               if (minorTextOption === 'lifecycle') {
                 const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
                 minor.setAttribute('x', String(boxX + boxWidth / 2))
-                minor.setAttribute('y', String(boxY + 28))
+                minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4))
                 minor.setAttribute('class', 'item-minor')
                 minor.setAttribute('text-anchor', 'middle')
                 minor.textContent = getLifecycleLabel(item.lifecycleStatus)
                 svg.appendChild(minor)
               } else if (minorTextOption === 'description' && item.description) {
-                const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                minor.setAttribute('x', String(boxX + boxWidth / 2))
-                minor.setAttribute('y', String(boxY + 28))
-                minor.setAttribute('class', 'item-minor')
-                minor.setAttribute('text-anchor', 'middle')
-                const descText = item.description.length > 20 ? item.description.substring(0, 20) + '...' : item.description
-                minor.textContent = descText
-                svg.appendChild(minor)
+                const descLines = wrapText(item.description, boxWidth - 8, 8)
+                descLines.forEach((line, idx) => {
+                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                  minor.setAttribute('x', String(boxX + boxWidth / 2))
+                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                  minor.setAttribute('class', 'item-minor')
+                  minor.setAttribute('text-anchor', 'middle')
+                  minor.textContent = line
+                  svg.appendChild(minor)
+                })
               }
             })
+            }
             
             rowOffset += rowHeightForItem + rowGap
           })
@@ -986,8 +1179,9 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
             const ungroupedCurrent = ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item))
             const ungroupedTarget = ungroupedSecondaryItems.filter((item: ItemRecord) => targetItems.includes(item))
             
-            const currentStartX = padding + primaryColWidth + colGap
-            ungroupedCurrent.forEach((item: ItemRecord, itemIdx: number) => {
+            if (showCurrent) {
+              const currentStartX = padding + primaryColWidth + colGap
+              ungroupedCurrent.forEach((item: ItemRecord, itemIdx: number) => {
               const col = itemIdx % boxesPerRow
               const row = Math.floor(itemIdx / boxesPerRow)
               const boxX = currentStartX + col * (boxWidth + boxGap)
@@ -1012,18 +1206,25 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               box.setAttribute('stroke-width', '1')
               svg.appendChild(box)
 
-              const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-              itemName.setAttribute('x', String(boxX + boxWidth / 2))
-              itemName.setAttribute('y', String(boxY + 15))
-              itemName.setAttribute('class', 'item-name')
-              itemName.setAttribute('text-anchor', 'middle')
-              const nameText = item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name
-              itemName.textContent = nameText
-              svg.appendChild(itemName)
+              // Item name (wrapped)
+              const nameLines = wrapText(item.name, boxWidth - 8, 10)
+              nameLines.forEach((line, idx) => {
+                const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                itemName.setAttribute('x', String(boxX + boxWidth / 2))
+                itemName.setAttribute('y', String(boxY + 12 + idx * 11))
+                itemName.setAttribute('class', 'item-name')
+                itemName.setAttribute('text-anchor', 'middle')
+                itemName.textContent = line
+                svg.appendChild(itemName)
+              })
             })
+            }
             
-            const targetStartX = padding + primaryColWidth + colGap + currentColWidth + colGap
-            ungroupedTarget.forEach((item: ItemRecord, itemIdx: number) => {
+            if (showTarget) {
+              const targetStartX = showCurrent 
+                ? padding + primaryColWidth + colGap + currentColWidth + colGap
+                : padding + primaryColWidth + colGap
+              ungroupedTarget.forEach((item: ItemRecord, itemIdx: number) => {
               const col = itemIdx % boxesPerRow
               const row = Math.floor(itemIdx / boxesPerRow)
               const boxX = targetStartX + col * (boxWidth + boxGap)
@@ -1048,15 +1249,19 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               box.setAttribute('stroke-width', '1')
               svg.appendChild(box)
 
-              const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-              itemName.setAttribute('x', String(boxX + boxWidth / 2))
-              itemName.setAttribute('y', String(boxY + 15))
-              itemName.setAttribute('class', 'item-name')
-              itemName.setAttribute('text-anchor', 'middle')
-              const nameText = item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name
-              itemName.textContent = nameText
-              svg.appendChild(itemName)
+              // Item name (wrapped)
+              const nameLines = wrapText(item.name, boxWidth - 8, 10)
+              nameLines.forEach((line, idx) => {
+                const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                itemName.setAttribute('x', String(boxX + boxWidth / 2))
+                itemName.setAttribute('y', String(boxY + 12 + idx * 11))
+                itemName.setAttribute('class', 'item-name')
+                itemName.setAttribute('text-anchor', 'middle')
+                itemName.textContent = line
+                svg.appendChild(itemName)
+              })
             })
+            }
             
             rowOffset += rowHeightForItem + rowGap
           }
@@ -1090,20 +1295,23 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
         primaryName.textContent = primaryItem.name
         svg.appendChild(primaryName)
 
-        // Primary item description (if shown)
+        // Primary item description (if shown, wrapped)
         if (minorTextOption !== 'none' && primaryItem.description) {
-          const primaryDesc = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-          primaryDesc.setAttribute('x', String(padding + 10))
-          primaryDesc.setAttribute('y', String(rowY + 35))
-          primaryDesc.setAttribute('class', 'primary-desc')
-          const descText = primaryItem.description.length > 50 ? primaryItem.description.substring(0, 50) + '...' : primaryItem.description
-          primaryDesc.textContent = descText
-          svg.appendChild(primaryDesc)
+          const descLines = wrapText(primaryItem.description, primaryColWidth - 20, 10)
+          descLines.forEach((line, idx) => {
+            const primaryDesc = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+            primaryDesc.setAttribute('x', String(padding + 10))
+            primaryDesc.setAttribute('y', String(rowY + 35 + idx * 12))
+            primaryDesc.setAttribute('class', 'primary-desc')
+            primaryDesc.textContent = line
+            svg.appendChild(primaryDesc)
+          })
         }
 
         // Current column items
-        const currentStartX = padding + primaryColWidth + colGap
-        divestItems.forEach((item: ItemRecord, itemIdx: number) => {
+        if (showCurrent) {
+          const currentStartX = padding + primaryColWidth + colGap
+          divestItems.forEach((item: ItemRecord, itemIdx: number) => {
           const col = itemIdx % boxesPerRow
           const row = Math.floor(itemIdx / boxesPerRow)
           const boxX = currentStartX + col * (boxWidth + boxGap)
@@ -1130,39 +1338,48 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           svg.appendChild(box)
 
           // Item name
-          const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-          itemName.setAttribute('x', String(boxX + boxWidth / 2))
-          itemName.setAttribute('y', String(boxY + 15))
-          itemName.setAttribute('class', 'item-name')
-          itemName.setAttribute('text-anchor', 'middle')
-          const nameText = item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name
-          itemName.textContent = nameText
-          svg.appendChild(itemName)
+          // Item name (wrapped)
+          const nameLines = wrapText(item.name, boxWidth - 8, 10)
+          nameLines.forEach((line, idx) => {
+            const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+            itemName.setAttribute('x', String(boxX + boxWidth / 2))
+            itemName.setAttribute('y', String(boxY + 12 + idx * 11))
+            itemName.setAttribute('class', 'item-name')
+            itemName.setAttribute('text-anchor', 'middle')
+            itemName.textContent = line
+            svg.appendChild(itemName)
+          })
 
           // Minor text
           if (minorTextOption === 'lifecycle') {
             const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
             minor.setAttribute('x', String(boxX + boxWidth / 2))
-            minor.setAttribute('y', String(boxY + 28))
+            minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4))
             minor.setAttribute('class', 'item-minor')
             minor.setAttribute('text-anchor', 'middle')
             minor.textContent = getLifecycleLabel(item.lifecycleStatus)
             svg.appendChild(minor)
           } else if (minorTextOption === 'description' && item.description) {
-            const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-            minor.setAttribute('x', String(boxX + boxWidth / 2))
-            minor.setAttribute('y', String(boxY + 28))
-            minor.setAttribute('class', 'item-minor')
-            minor.setAttribute('text-anchor', 'middle')
-            const descText = item.description.length > 20 ? item.description.substring(0, 20) + '...' : item.description
-            minor.textContent = descText
-            svg.appendChild(minor)
+            const descLines = wrapText(item.description, boxWidth - 8, 8)
+            descLines.forEach((line, idx) => {
+              const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+              minor.setAttribute('x', String(boxX + boxWidth / 2))
+              minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+              minor.setAttribute('class', 'item-minor')
+              minor.setAttribute('text-anchor', 'middle')
+              minor.textContent = line
+              svg.appendChild(minor)
+            })
           }
         })
+        }
 
         // Target column items
-        const targetStartX = padding + primaryColWidth + colGap + currentColWidth + colGap
-        targetItems.forEach((item: ItemRecord, itemIdx: number) => {
+        if (showTarget) {
+          const targetStartX = showCurrent 
+            ? padding + primaryColWidth + colGap + currentColWidth + colGap
+            : padding + primaryColWidth + colGap
+          targetItems.forEach((item: ItemRecord, itemIdx: number) => {
           const col = itemIdx % boxesPerRow
           const row = Math.floor(itemIdx / boxesPerRow)
           const boxX = targetStartX + col * (boxWidth + boxGap)
@@ -1189,35 +1406,41 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           svg.appendChild(box)
 
           // Item name
-          const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-          itemName.setAttribute('x', String(boxX + boxWidth / 2))
-          itemName.setAttribute('y', String(boxY + 15))
-          itemName.setAttribute('class', 'item-name')
-          itemName.setAttribute('text-anchor', 'middle')
-          const nameText = item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name
-          itemName.textContent = nameText
-          svg.appendChild(itemName)
+          // Item name (wrapped)
+          const nameLines = wrapText(item.name, boxWidth - 8, 10)
+          nameLines.forEach((line, idx) => {
+            const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+            itemName.setAttribute('x', String(boxX + boxWidth / 2))
+            itemName.setAttribute('y', String(boxY + 12 + idx * 11))
+            itemName.setAttribute('class', 'item-name')
+            itemName.setAttribute('text-anchor', 'middle')
+            itemName.textContent = line
+            svg.appendChild(itemName)
+          })
 
           // Minor text
           if (minorTextOption === 'lifecycle') {
             const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
             minor.setAttribute('x', String(boxX + boxWidth / 2))
-            minor.setAttribute('y', String(boxY + 28))
+            minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4))
             minor.setAttribute('class', 'item-minor')
             minor.setAttribute('text-anchor', 'middle')
             minor.textContent = getLifecycleLabel(item.lifecycleStatus)
             svg.appendChild(minor)
           } else if (minorTextOption === 'description' && item.description) {
-            const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-            minor.setAttribute('x', String(boxX + boxWidth / 2))
-            minor.setAttribute('y', String(boxY + 28))
-            minor.setAttribute('class', 'item-minor')
-            minor.setAttribute('text-anchor', 'middle')
-            const descText = item.description.length > 20 ? item.description.substring(0, 20) + '...' : item.description
-            minor.textContent = descText
-            svg.appendChild(minor)
+            const descLines = wrapText(item.description, boxWidth - 8, 8)
+            descLines.forEach((line, idx) => {
+              const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+              minor.setAttribute('x', String(boxX + boxWidth / 2))
+              minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+              minor.setAttribute('class', 'item-minor')
+              minor.setAttribute('text-anchor', 'middle')
+              minor.textContent = line
+              svg.appendChild(minor)
+            })
           }
         })
+        }
         
         rowOffset += rowHeightForItem + (idx < groupItems.length - 1 ? rowGap : 0)
       })
@@ -1311,6 +1534,16 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     })
   }, [itemAnalysis])
 
+  // Get grid columns class based on view mode
+  const getGridColsClass = (): string => {
+    if (hasAnyLifecycleStatus && columnViewMode !== 'both') {
+      // Single column mode - use more columns to fill the width
+      return 'grid-cols-5'
+    }
+    // Two column mode or no lifecycle status - use 3 columns
+    return 'grid-cols-3'
+  }
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-4 p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
@@ -1375,6 +1608,20 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               >
                 <option value="only-related">Only show roll-ups</option>
                 <option value="show-secondary">Show secondary when not related</option>
+              </select>
+            </label>
+          )}
+          {primaryLens && secondaryLens && hasAnyLifecycleStatus && (
+            <label className="flex items-center gap-2">
+              <span className="text-xs">Show:</span>
+              <select
+                value={columnViewMode}
+                onChange={e => setColumnViewMode(e.target.value as 'both' | 'current' | 'target')}
+                className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+              >
+                <option value="both">Current and Target</option>
+                <option value="current">Current</option>
+                <option value="target">Target</option>
               </select>
             </label>
           )}
@@ -1454,18 +1701,36 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           itemAnalysis.length > 0 ? (
             <div ref={contentRef} className="max-w-7xl mx-auto">
               {/* Column headers */}
-              <div className={`grid ${hasAnyLifecycleStatus ? 'grid-cols-[200px_1fr_1fr]' : 'grid-cols-[200px_1fr]'} gap-3 mb-2 pb-2 border-b-2 border-slate-300 dark:border-slate-700`}>
+              <div className={`grid ${(() => {
+                if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
+                if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
+                return 'grid-cols-[200px_1fr]'
+              })()} gap-3 mb-2 pb-2 border-b-2 border-slate-300 dark:border-slate-700`}>
                 <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
                   {LENSES.find(l => l.key === primaryLens)?.label || primaryLens}
                 </div>
                 {hasAnyLifecycleStatus ? (
                   <>
-                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
-                      Current
-                    </div>
-                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center ml-12">
-                      Target
-                    </div>
+                    {columnViewMode === 'both' && (
+                      <>
+                        <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                          Current
+                        </div>
+                        <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                          Target
+                        </div>
+                      </>
+                    )}
+                    {columnViewMode === 'current' && (
+                      <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                        Current
+                      </div>
+                    )}
+                    {columnViewMode === 'target' && (
+                      <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                        Target
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
@@ -1525,7 +1790,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                             return (
                               <div
                                 key={primaryItem.id}
-                                className={`grid ${hasAnyLifecycleStatus ? 'grid-cols-[200px_1fr_1fr]' : 'grid-cols-[200px_1fr]'} gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
+                                className={`grid ${(() => {
+                                  if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
+                                  if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
+                                  return 'grid-cols-[200px_1fr]'
+                                })()} gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
                               >
                                 {/* Left: Primary Item Name */}
                                 <div className="flex flex-col justify-start">
@@ -1547,8 +1816,9 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                 
                                 {hasAnyLifecycleStatus ? (
                                   <>
-                                    {/* Middle Column: Current items from all roll-up groups */}
-                                    <div>
+                                    {(columnViewMode === 'both' || columnViewMode === 'current') && (
+                                      /* Middle Column: Current items from all roll-up groups */
+                                      <div className={columnViewMode === 'both' ? 'mr-6' : ''}>
                                   {/* Roll-up Groups - Current Items */}
                                   <div className="space-y-3">
                                   {rollupGroups.map((group: any) => {
@@ -1559,53 +1829,103 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       return (
                                         <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
                                           {hasCurrentItems ? (
-                                            <div className="grid grid-cols-3 gap-1">
-                                              <div
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
-                                                onClick={() => {
-                                                  if (group.rollupItem.id) {
-                                                    setEditItem(group.rollupItem)
-                                                    setEditDialogOpen(true)
-                                                  }
-                                                }}
-                                              >
-                                                <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                                  {group.rollupItem.name}
-                                                </div>
-                                                {minorTextOption === 'description' && group.rollupItem.description && (
-                                                  <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                    {group.rollupItem.description}
-                                                  </div>
-                                                )}
-                                                {minorTextOption === 'lifecycle' && (
-                                                  <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                                    {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
-                                                  </div>
-                                                )}
+                                            <div className={`grid ${getGridColsClass()} gap-1`}>
+                                            <div
+                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                                if (group.rollupItem.id) {
+                                                  const isHovered = hoveredItemId === group.rollupItem.id
+                                                  const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                  const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                  return isHovered || isRelated ? `outline outline-2 ${getOutlineColor(group.rollupItem.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                                } else {
+                                                  // Parent name - highlight if this parent is hovered (use gray outline for parent names)
+                                                  return hoveredParentName === group.rollupItem.name ? 'outline outline-2 outline-gray-300 dark:outline-gray-700 outline-offset-[-1px]' : ''
+                                                }
+                                              })()}`}
+                                              onMouseEnter={() => {
+                                                if (group.rollupItem.id) {
+                                                  setHoveredItemId(group.rollupItem.id)
+                                                } else {
+                                                  // Parent name - set hovered parent
+                                                  setHoveredParentName(group.rollupItem.name)
+                                                }
+                                              }}
+                                              onMouseLeave={() => {
+                                                if (group.rollupItem.id) {
+                                                  setHoveredItemId(null)
+                                                } else {
+                                                  setHoveredParentName(null)
+                                                }
+                                              }}
+                                              onClick={() => {
+                                                if (group.rollupItem.id) {
+                                                  setEditItem(group.rollupItem)
+                                                  setEditDialogOpen(true)
+                                                }
+                                              }}
+                                            >
+                                              <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                                {group.rollupItem.name}
                                               </div>
+                                              {minorTextOption === 'description' && group.rollupItem.description && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {group.rollupItem.description}
+                                                </div>
+                                              )}
+                                              {minorTextOption === 'lifecycle' && (
+                                                <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                                  {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
+                                                </div>
+                                              )}
                                             </div>
-                                          ) : null}
-                                        </div>
-                                      )
-                                    }
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    )
+                                  }
+                                  
+                                  // For "show-secondary" mode, show roll-up items as boxes (not headers) for related items
+                                  if (rollupMode === 'show-secondary') {
+                                    const hasCurrentItems = group.divestItems.length > 0
                                     
-                                    // For "show-secondary" mode, show roll-up items as boxes (not headers) for related items
-                                    if (rollupMode === 'show-secondary') {
-                                      const hasCurrentItems = group.divestItems.length > 0
-                                      
-                                      return (
-                                        <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
-                                          {hasCurrentItems ? (
-                                            <div className="grid grid-cols-3 gap-1">
-                                              <div
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
-                                                onClick={() => {
-                                                  if (group.rollupItem.id) {
-                                                    setEditItem(group.rollupItem)
-                                                    setEditDialogOpen(true)
-                                                  }
-                                                }}
-                                              >
+                                    return (
+                                      <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
+                                        {hasCurrentItems ? (
+                                          <div className={`grid ${getGridColsClass()} gap-1`}>
+                                            <div
+                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                                if (group.rollupItem.id) {
+                                                  const isHovered = hoveredItemId === group.rollupItem.id
+                                                  const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                  const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                  return isHovered || isRelated ? 'border-2' : ''
+                                                } else {
+                                                  // Parent name - highlight if this parent is hovered
+                                                  return hoveredParentName === group.rollupItem.name ? 'border-2' : ''
+                                                }
+                                              })()}`}
+                                              onMouseEnter={() => {
+                                                if (group.rollupItem.id) {
+                                                  setHoveredItemId(group.rollupItem.id)
+                                                } else {
+                                                  // Parent name - set hovered parent
+                                                  setHoveredParentName(group.rollupItem.name)
+                                                }
+                                              }}
+                                              onMouseLeave={() => {
+                                                if (group.rollupItem.id) {
+                                                  setHoveredItemId(null)
+                                                } else {
+                                                  setHoveredParentName(null)
+                                                }
+                                              }}
+                                              onClick={() => {
+                                                if (group.rollupItem.id) {
+                                                  setEditItem(group.rollupItem)
+                                                  setEditDialogOpen(true)
+                                                }
+                                              }}
+                                            >
                                                 <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
                                                   {group.rollupItem.name}
                                                 </div>
@@ -1633,9 +1953,34 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                     return (
                                       <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
                                         {hasCurrentItems ? (
-                                          <div className="grid grid-cols-3 gap-1">
+                                          <div className={`grid ${getGridColsClass()} gap-1`}>
                                             <div
-                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                                if (group.rollupItem.id) {
+                                                  const isHovered = hoveredItemId === group.rollupItem.id
+                                                  const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                  const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                  return isHovered || isRelated ? `outline outline-2 ${getOutlineColor(group.rollupItem.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                                } else {
+                                                  // Parent name - highlight if this parent is hovered (use gray outline for parent names)
+                                                  return hoveredParentName === group.rollupItem.name ? 'outline outline-2 outline-gray-300 dark:outline-gray-700 outline-offset-[-1px]' : ''
+                                                }
+                                              })()}`}
+                                              onMouseEnter={() => {
+                                                if (group.rollupItem.id) {
+                                                  setHoveredItemId(group.rollupItem.id)
+                                                } else {
+                                                  // Parent name - set hovered parent
+                                                  setHoveredParentName(group.rollupItem.name)
+                                                }
+                                              }}
+                                              onMouseLeave={() => {
+                                                if (group.rollupItem.id) {
+                                                  setHoveredItemId(null)
+                                                } else {
+                                                  setHoveredParentName(null)
+                                                }
+                                              }}
                                               onClick={() => {
                                                 if (group.rollupItem.id) {
                                                   setEditItem(group.rollupItem)
@@ -1688,7 +2033,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         const count = ungroupedCurrent.length
                                         const secondaryLensLabel = LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens
                                         return count > 0 ? (
-                                          <div className="grid grid-cols-3 gap-1">
+                                          <div className={`grid ${getGridColsClass()} gap-1`}>
                                             <div className="p-1 rounded border text-center bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700">
                                               <div className="text-xs text-slate-600 dark:text-slate-400">
                                                 +{count} other {secondaryLensLabel}
@@ -1704,11 +2049,22 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                   {rollupMode === 'show-secondary' && ungroupedSecondaryItems && ungroupedSecondaryItems.length > 0 && (
                                     <div className={rollupGroups.length > 0 ? 'mt-3' : ''}>
                                       {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).length > 0 ? (
-                                        <div className="grid grid-cols-3 gap-1">
-                                          {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).map((item: ItemRecord) => (
+                                        <div className={`grid ${getGridColsClass()} gap-1`}>
+                                          {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).map((item: ItemRecord) => {
+                                            const isHighlighted = shouldHighlightItem(item)
+                                            const highlightClass = isHighlighted ? `outline outline-2 ${getOutlineColor(item.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                            return (
                                             <div
                                               key={item.id}
-                                              className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                              className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                              onMouseEnter={() => {
+                                                if (item.id) setHoveredItemId(item.id)
+                                                setHoveredParentName(null)
+                                              }}
+                                              onMouseLeave={() => {
+                                                setHoveredItemId(null)
+                                                setHoveredParentName(null)
+                                              }}
                                               onClick={() => {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
@@ -1728,16 +2084,19 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                 </div>
                                               )}
                                             </div>
-                                          ))}
+                                            )
+                                          })}
                                         </div>
                                       ) : null}
                                     </div>
                                   )}
                                       </div>
                                     </div>
+                                    )}
                                     
-                                    {/* Right Column: Target items from all roll-up groups */}
-                                    <div className="ml-12">
+                                    {(columnViewMode === 'both' || columnViewMode === 'target') && (
+                                      /* Right Column: Target items from all roll-up groups */
+                                      <div className={columnViewMode === 'both' ? 'ml-6' : ''}>
                                   {/* Roll-up Groups - Target Items */}
                                   <div className="space-y-3">
                                   {rollupGroups.map((group: any) => {
@@ -1749,9 +2108,17 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       return (
                                         <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
                                           {hasTargetItemsInGroup ? (
-                                            <div className="grid grid-cols-3 gap-1">
+                                            <div className={`grid ${getGridColsClass()} gap-1`}>
                                               <div
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                                  if (!group.rollupItem.id) return ''
+                                                  const isHovered = hoveredItemId === group.rollupItem.id
+                                                  const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                  const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                  return isHovered || isRelated ? 'border-2' : ''
+                                                })()}`}
+                                                onMouseEnter={() => group.rollupItem.id && setHoveredItemId(group.rollupItem.id)}
+                                                onMouseLeave={() => setHoveredItemId(null)}
                                                 onClick={() => {
                                                   if (group.rollupItem.id) {
                                                     setEditItem(group.rollupItem)
@@ -1798,9 +2165,17 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       return (
                                         <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
                                           {hasTargetItemsInGroup ? (
-                                            <div className="grid grid-cols-3 gap-1">
+                                            <div className={`grid ${getGridColsClass()} gap-1`}>
                                               <div
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                                  if (!group.rollupItem.id) return ''
+                                                  const isHovered = hoveredItemId === group.rollupItem.id
+                                                  const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                  const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                  return isHovered || isRelated ? 'border-2' : ''
+                                                })()}`}
+                                                onMouseEnter={() => group.rollupItem.id && setHoveredItemId(group.rollupItem.id)}
+                                                onMouseLeave={() => setHoveredItemId(null)}
                                                 onClick={() => {
                                                   if (group.rollupItem.id) {
                                                     setEditItem(group.rollupItem)
@@ -1846,9 +2221,34 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                     return (
                                       <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
                                         {hasTargetItemsInGroup ? (
-                                          <div className="grid grid-cols-3 gap-1">
+                                          <div className={`grid ${getGridColsClass()} gap-1`}>
                                             <div
-                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                                if (group.rollupItem.id) {
+                                                  const isHovered = hoveredItemId === group.rollupItem.id
+                                                  const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                  const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                  return isHovered || isRelated ? `outline outline-2 ${getOutlineColor(group.rollupItem.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                                } else {
+                                                  // Parent name - highlight if this parent is hovered (use gray outline for parent names)
+                                                  return hoveredParentName === group.rollupItem.name ? 'outline outline-2 outline-gray-300 dark:outline-gray-700 outline-offset-[-1px]' : ''
+                                                }
+                                              })()}`}
+                                              onMouseEnter={() => {
+                                                if (group.rollupItem.id) {
+                                                  setHoveredItemId(group.rollupItem.id)
+                                                } else {
+                                                  // Parent name - set hovered parent
+                                                  setHoveredParentName(group.rollupItem.name)
+                                                }
+                                              }}
+                                              onMouseLeave={() => {
+                                                if (group.rollupItem.id) {
+                                                  setHoveredItemId(null)
+                                                } else {
+                                                  setHoveredParentName(null)
+                                                }
+                                              }}
                                               onClick={() => {
                                                 if (group.rollupItem.id) {
                                                   setEditItem(group.rollupItem)
@@ -1914,7 +2314,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         const count = ungroupedTarget.length
                                         const secondaryLensLabel = LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens
                                         return count > 0 ? (
-                                          <div className="grid grid-cols-3 gap-1">
+                                          <div className={`grid ${getGridColsClass()} gap-1`}>
                                             <div className="p-1 rounded border text-center bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700">
                                               <div className="text-xs text-slate-600 dark:text-slate-400">
                                                 +{count} other {secondaryLensLabel}
@@ -1930,11 +2330,22 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                   {rollupMode === 'show-secondary' && ungroupedSecondaryItems && ungroupedSecondaryItems.length > 0 && (
                                     <div className={rollupGroups.length > 0 ? 'mt-3' : ''}>
                                       {ungroupedSecondaryItems.filter((item: ItemRecord) => targetItems.includes(item)).length > 0 ? (
-                                        <div className="grid grid-cols-3 gap-1">
-                                          {ungroupedSecondaryItems.filter((item: ItemRecord) => targetItems.includes(item)).map((item: ItemRecord) => (
+                                        <div className={`grid ${getGridColsClass()} gap-1`}>
+                                          {ungroupedSecondaryItems.filter((item: ItemRecord) => targetItems.includes(item)).map((item: ItemRecord) => {
+                                            const isHighlighted = shouldHighlightItem(item)
+                                            const highlightClass = isHighlighted ? `outline outline-2 ${getOutlineColor(item.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                            return (
                                             <div
                                               key={item.id}
-                                              className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                              className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                              onMouseEnter={() => {
+                                                if (item.id) setHoveredItemId(item.id)
+                                                setHoveredParentName(null)
+                                              }}
+                                              onMouseLeave={() => {
+                                                setHoveredItemId(null)
+                                                setHoveredParentName(null)
+                                              }}
                                               onClick={() => {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
@@ -1954,7 +2365,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                 </div>
                                               )}
                                             </div>
-                                          ))}
+                                            )
+                                          })}
                                         </div>
                                       ) : targetItems.length > 0 ? (
                                         null
@@ -1972,6 +2384,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                   )}
                                   </div>
                                 </div>
+                                    )}
                                   </>
                                 ) : (
                                   /* Single Column: All items from roll-up groups when no lifecycleStatus */
@@ -1981,9 +2394,17 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         {rollupGroups.map((group: any) => (
                                           <div key={group.rollupItem.id || `parent-${group.rollupItem.name}`}>
                                             {(group.divestItems || []).length > 0 ? (
-                                              <div className="grid grid-cols-3 gap-1">
+                                              <div className={`grid ${getGridColsClass()} gap-1`}>
                                                 <div
-                                                  className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                                  className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                                    if (!group.rollupItem.id) return ''
+                                                    const isHovered = hoveredItemId === group.rollupItem.id
+                                                    const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                    const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                    return isHovered || isRelated ? 'border-2' : ''
+                                                  })()}`}
+                                                  onMouseEnter={() => group.rollupItem.id && setHoveredItemId(group.rollupItem.id)}
+                                                  onMouseLeave={() => setHoveredItemId(null)}
                                                   onClick={() => {
                                                     if (group.rollupItem.id) {
                                                       setEditItem(group.rollupItem)
@@ -2011,11 +2432,22 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         ))}
                                         {ungroupedSecondaryItems && ungroupedSecondaryItems.length > 0 && (
                                           <div className={rollupGroups.length > 0 ? 'mt-3' : ''}>
-                                            <div className="grid grid-cols-3 gap-1">
-                                              {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).map((item: ItemRecord) => (
+                                            <div className={`grid ${getGridColsClass()} gap-1`}>
+                                              {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).map((item: ItemRecord) => {
+                                                const isHighlighted = shouldHighlightItem(item)
+                                                const highlightClass = isHighlighted ? `outline outline-2 ${getOutlineColor(item.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                                return (
                                                 <div
                                                   key={item.id}
-                                                  className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                                  className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                                  onMouseEnter={() => {
+                                                    if (item.id) setHoveredItemId(item.id)
+                                                    setHoveredParentName(null)
+                                                  }}
+                                                  onMouseLeave={() => {
+                                                    setHoveredItemId(null)
+                                                    setHoveredParentName(null)
+                                                  }}
                                                   onClick={() => {
                                                     setEditItem(item)
                                                     setEditDialogOpen(true)
@@ -2035,7 +2467,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                     </div>
                                                   )}
                                                 </div>
-                                              ))}
+                                                )
+                                              })}
                                             </div>
                                           </div>
                                         )}
@@ -2055,7 +2488,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                           return (
                             <div
                               key={primaryItem.id}
-                              className={`grid ${hasAnyLifecycleStatus ? 'grid-cols-[200px_1fr_1fr]' : 'grid-cols-[200px_1fr]'} gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
+                              className={`grid ${(() => {
+                                if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
+                                if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
+                                return 'grid-cols-[200px_1fr]'
+                              })()} gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
                             >
                               {/* Left: Primary Item Name */}
                               <div className="flex flex-col justify-start">
@@ -2077,14 +2514,26 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                               
                               {hasAnyLifecycleStatus ? (
                                 <>
-                                  {/* Middle Column: Current (Invest items with relationship lifecycle None or Divest) */}
-                                  <div>
+                                  {(columnViewMode === 'both' || columnViewMode === 'current') && (
+                                    /* Middle Column: Current (Invest items with relationship lifecycle None or Divest) */
+                                    <div className={columnViewMode === 'both' ? 'mr-6' : ''}>
                                     {divestItems.length > 0 ? (
-                                      <div className="grid grid-cols-3 gap-1">
-                                        {divestItems.map((item: ItemRecord) => (
+                                      <div className={`grid ${getGridColsClass()} gap-1`}>
+                                        {divestItems.map((item: ItemRecord) => {
+                                          const isHighlighted = shouldHighlightItem(item)
+                                          const highlightClass = isHighlighted ? `outline outline-2 ${getOutlineColor(item.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                          return (
                                           <div
                                             key={item.id}
-                                            className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                            className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                            onMouseEnter={() => {
+                                              if (item.id) setHoveredItemId(item.id)
+                                              setHoveredParentName(null)
+                                            }}
+                                            onMouseLeave={() => {
+                                              setHoveredItemId(null)
+                                              setHoveredParentName(null)
+                                            }}
                                             onClick={() => {
                                               setEditItem(item)
                                               setEditDialogOpen(true)
@@ -2104,7 +2553,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                               </div>
                                             )}
                                           </div>
-                                        ))}
+                                          )
+                                        })}
                                       </div>
                                     ) : (
                                       <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
@@ -2112,15 +2562,28 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       </div>
                                     )}
                                   </div>
+                                  )}
                                   
-                                  {/* Right Column: Target (Replacement Items + Other Items + No Status) */}
-                                  <div className="ml-12">
+                                  {(columnViewMode === 'both' || columnViewMode === 'target') && (
+                                    /* Right Column: Target (Replacement Items + Other Items + No Status) */
+                                    <div className={columnViewMode === 'both' ? 'ml-6' : ''}>
                                     {targetItems.length > 0 ? (
-                                      <div className="grid grid-cols-3 gap-1">
-                                        {targetItems.map((item: ItemRecord) => (
+                                      <div className={`grid ${getGridColsClass()} gap-1`}>
+                                        {targetItems.map((item: ItemRecord) => {
+                                          const isHighlighted = shouldHighlightItem(item)
+                                          const highlightClass = isHighlighted ? `outline outline-2 ${getOutlineColor(item.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                          return (
                                           <div
                                             key={item.id}
-                                            className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                            className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                            onMouseEnter={() => {
+                                              if (item.id) setHoveredItemId(item.id)
+                                              setHoveredParentName(null)
+                                            }}
+                                            onMouseLeave={() => {
+                                              setHoveredItemId(null)
+                                              setHoveredParentName(null)
+                                            }}
                                             onClick={() => {
                                               setEditItem(item)
                                               setEditDialogOpen(true)
@@ -2140,7 +2603,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                               </div>
                                             )}
                                           </div>
-                                        ))}
+                                          )
+                                        })}
                                       </div>
                                     ) : (
                                       <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
@@ -2153,16 +2617,28 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       </div>
                                     )}
                                   </div>
+                                  )}
                                 </>
                               ) : (
                                 /* Single Column: All items when no lifecycleStatus */
                                 <div>
                                   {allItems && allItems.length > 0 ? (
-                                    <div className="grid grid-cols-3 gap-1">
-                                      {allItems.map((item: ItemRecord) => (
+                                    <div className={`grid ${getGridColsClass()} gap-1`}>
+                                      {allItems.map((item: ItemRecord) => {
+                                        const isHighlighted = shouldHighlightItem(item)
+                                        const highlightClass = isHighlighted ? `outline outline-2 ${getOutlineColor(item.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                        return (
                                         <div
                                           key={item.id}
-                                          className={`p-1 rounded border text-center ${getInnerBoxColor(item.lifecycleStatus)} cursor-pointer hover:opacity-80`}
+                                          className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                          onMouseEnter={() => {
+                                            if (item.id) setHoveredItemId(item.id)
+                                            setHoveredParentName(null)
+                                          }}
+                                          onMouseLeave={() => {
+                                            setHoveredItemId(null)
+                                            setHoveredParentName(null)
+                                          }}
                                           onClick={() => {
                                             setEditItem(item)
                                             setEditDialogOpen(true)
@@ -2182,7 +2658,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                             </div>
                                           )}
                                         </div>
-                                      ))}
+                                        )
+                                      })}
                                     </div>
                                   ) : (
                                     <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">

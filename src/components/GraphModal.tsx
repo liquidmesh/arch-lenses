@@ -830,9 +830,105 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     const scaleMatch = currentTransform.match(/scale\(([^)]+)\)/)
     const scale = scaleMatch ? parseFloat(scaleMatch[1]) : 1
     
+    // Calculate actual bounding box of all elements
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    
+    // Check all nodes
+    layout.nodes.forEach(node => {
+      const nodeHalfWidth = layout.nodeWidth / 2
+      const nodeHalfHeight = layout.nodeHeight / 2
+      minX = Math.min(minX, node.x - nodeHalfWidth)
+      minY = Math.min(minY, node.y - nodeHalfHeight)
+      maxX = Math.max(maxX, node.x + nodeHalfWidth)
+      maxY = Math.max(maxY, node.y + nodeHalfHeight)
+    })
+    
+    // Check all headers
+    layout.headers.forEach(header => {
+      minX = Math.min(minX, header.x)
+      minY = Math.min(minY, header.y)
+      maxX = Math.max(maxX, header.x + header.width)
+      maxY = Math.max(maxY, header.y + header.height)
+    })
+    
+    // Check all parent groups
+    layout.parentGroups.forEach(group => {
+      minX = Math.min(minX, group.x)
+      minY = Math.min(minY, group.y)
+      maxX = Math.max(maxX, group.x + group.width)
+      maxY = Math.max(maxY, group.y + group.height)
+    })
+    
+    // Check relationship lines (they can extend beyond nodes)
+    // Use all relationships between visible items for bounding box calculation
+    if (showRelationshipLines && rels) {
+      const visibleItemIds = new Set(layout.nodes.map(n => n.id).filter((id): id is number => id !== undefined))
+      rels.forEach(rel => {
+        // Only include relationships where both items are visible
+        if (visibleItemIds.has(rel.fromItemId) && visibleItemIds.has(rel.toItemId)) {
+          const fromPos = layout.positions.get(rel.fromItemId)
+          const toPos = layout.positions.get(rel.toItemId)
+          if (fromPos && toPos) {
+            // Relationship lines use curves, so check both endpoints and midpoint
+            // For cubic bezier curves, the control points can extend beyond the endpoints
+            const midX = (fromPos.x + toPos.x) / 2
+            const midY = (fromPos.y + toPos.y) / 2
+            // Add extra margin for curve control points (curves can extend ~20% beyond midpoint)
+            const curveMargin = 20
+            minX = Math.min(minX, fromPos.x, toPos.x, midX - curveMargin)
+            minY = Math.min(minY, fromPos.y, toPos.y, midY - curveMargin)
+            maxX = Math.max(maxX, fromPos.x, toPos.x, midX + curveMargin)
+            maxY = Math.max(maxY, fromPos.y, toPos.y, midY + curveMargin)
+          }
+        }
+      })
+    }
+    
+    // Check manager positions if they exist (for Architecture Coverage view)
+    if (viewMode === 'skillGaps' || viewMode === 'architectureManager') {
+      managerPositions.forEach((pos) => {
+        const managerBoxWidth = 120
+        const managerBoxHeight = 35
+        minX = Math.min(minX, pos.x - managerBoxWidth / 2)
+        minY = Math.min(minY, pos.y - managerBoxHeight / 2)
+        maxX = Math.max(maxX, pos.x + managerBoxWidth / 2)
+        maxY = Math.max(maxY, pos.y + managerBoxHeight / 2)
+      })
+    }
+    
+    // Add padding
+    const padding = 20
+    minX = Math.min(minX, 0) - padding
+    minY = Math.min(minY, 0) - padding
+    maxX = maxX + padding
+    maxY = maxY + padding
+    
+    // Calculate actual dimensions from content
+    const contentWidth = maxX - minX
+    const contentHeight = maxY - minY
+    
+    // Ensure we use at least the layout dimensions (they should already account for most content)
+    // If layout is larger, expand our bounding box to match
+    if (layout.width > contentWidth) {
+      const extraWidth = layout.width - contentWidth
+      maxX = maxX + extraWidth
+    }
+    if (layout.height > contentHeight) {
+      const extraHeight = layout.height - contentHeight
+      maxY = maxY + extraHeight
+    }
+    
+    // Final dimensions
+    const finalWidth = maxX - minX
+    const finalHeight = maxY - minY
+    
     // Set explicit dimensions accounting for zoom
-    svgClone.setAttribute('width', String(layout.width * scale))
-    svgClone.setAttribute('height', String(layout.height * scale))
+    svgClone.setAttribute('width', String(finalWidth * scale))
+    svgClone.setAttribute('height', String(finalHeight * scale))
+    svgClone.setAttribute('viewBox', `${minX} ${minY} ${finalWidth} ${finalHeight}`)
     svgClone.style.transform = ''
     svgClone.style.transformOrigin = ''
     
@@ -2425,7 +2521,32 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     const height = Math.max(availableH, contentH)
     const nodeWidth = Math.min(200, Math.floor(colWidth * 0.9))
 
-    return { width, height, nodes, positions, headers, nodeWidth, nodeHeight, parentGroups }
+    // Center-align: calculate offset to center all columns
+    const totalColumnsWidth = n * colWidth + (n - 1) * colGap
+    const centerOffset = (width - totalColumnsWidth) / 2
+
+    // Adjust all positions and headers to be center-aligned
+    const centeredPositions = new Map<number, { x: number; y: number }>()
+    positions.forEach((pos, id) => {
+      centeredPositions.set(id, { x: pos.x + centerOffset - padding, y: pos.y })
+    })
+    
+    const centeredNodes = nodes.map(node => ({
+      ...node,
+      x: node.x + centerOffset - padding
+    }))
+    
+    const centeredHeaders = headers.map(header => ({
+      ...header,
+      x: header.x + centerOffset - padding
+    }))
+    
+    const centeredParentGroups = parentGroups.map(group => ({
+      ...group,
+      x: group.x + centerOffset - padding
+    }))
+
+    return { width, height, nodes: centeredNodes, positions: centeredPositions, headers: centeredHeaders, nodeWidth, nodeHeight, parentGroups: centeredParentGroups }
   } else {
     // Row layout: lenses as rows
     const rowHeight = nodeHeight + rowGap
@@ -2436,7 +2557,7 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     visibleLenses.forEach((l) => {
       const rowItems = items.filter(i => i.lens === l.key)
       
-      // Position header for this lens
+      // Position header for this lens (centered)
       headers.push({
         key: l.key as LensKey,
         label: l.label,
@@ -2463,19 +2584,27 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
           }
           itemsByParent.get(parentKey)!.push(item)
         })
-        // Sort parents (null first, then alphabetically)
-        const sortedParents = Array.from(itemsByParent.keys()).sort((a, b) => {
-          if (a === null) return -1
-          if (b === null) return 1
-          return a.localeCompare(b)
-        })
-        
         const parentGroupPadding = 2
         const parentGroupHeaderHeight = 20
-        const parentGroupGap = 10 // Gap between parent boxes
+        const parentGroupGap = 10 // Gap between parent boxes and standalone items
         
-        let currentX = padding
-        let maxYInRow = currentY
+        // Collect parent boxes and standalone items, then position them together in rows
+        interface ParentBoxInfo {
+          parent: string | null
+          parentItems: ItemRecord[]
+          width: number
+          height: number
+          isStandalone: boolean // true for items without parent
+        }
+        
+        const allBoxes: ParentBoxInfo[] = []
+        
+        // Add parent boxes
+        const sortedParents = Array.from(itemsByParent.keys()).sort((a, b) => {
+          if (a === null) return 1 // Put null (standalone) last
+          if (b === null) return -1
+          return a.localeCompare(b)
+        })
         
         sortedParents.forEach((parent) => {
           const parentItems = itemsByParent.get(parent)!
@@ -2493,73 +2622,133 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
             const groupWidth = itemsWidth + parentGroupPadding * 2
             const groupHeight = numItemRows * rowHeight + parentGroupPadding * 2 + parentGroupHeaderHeight
             
-            // Check if we need to start a new row (if this box would overflow)
-            if (currentX + groupWidth > availableW - padding) {
-              currentX = padding
-              currentY = maxYInRow + parentGroupGap
-              maxYInRow = currentY
-            }
-            
-            const groupX = currentX
-            const groupY = currentY
-            
-            parentGroups.push({
+            allBoxes.push({
               parent,
-              x: groupX,
-              y: groupY,
+              parentItems,
               width: groupWidth,
               height: groupHeight,
-              lens: l.key as LensKey
+              isStandalone: false
             })
-            
-            // Position items within parent group
-            parentItems.forEach((it, colIdx) => {
-              const col = colIdx % itemsPerRowInBox
-              const row = Math.floor(colIdx / itemsPerRowInBox)
-              const x = groupX + parentGroupPadding + col * (itemWidthInBox + colGap) + itemWidthInBox / 2
-              const y = groupY + parentGroupHeaderHeight + parentGroupPadding + row * rowHeight + nodeHeight / 2
-              if (it.id) positions.set(it.id, { x, y })
-              nodes.push({ ...it, x, y })
-            })
-            
-            // Update max Y for this row
-            maxYInRow = Math.max(maxYInRow, groupY + groupHeight)
-            
-            // Move to next position
-            currentX += groupWidth + parentGroupGap
-          } else {
-            // Items without parent - position normally
-            parentItems.forEach((it, colIdx) => {
-              const col = colIdx % itemsPerRow
-              const row = Math.floor(colIdx / itemsPerRow)
-              const x = padding + col * (itemWidth + colGap) + itemWidth / 2
-              const y = currentY + row * rowHeight + nodeHeight / 2
-              if (it.id) positions.set(it.id, { x, y })
-              nodes.push({ ...it, x, y })
-            })
-            
-            const numItemRows = Math.ceil(parentItems.length / itemsPerRow)
-            if (numItemRows > 0) {
-              currentY += numItemRows * rowHeight + 10 // Gap after items
-              maxYInRow = Math.max(maxYInRow, currentY)
-            }
           }
         })
         
-        // Update currentY to the bottom of the last row of parent boxes
+        // Add standalone items (items without parent) as a "box"
+        const itemsWithoutParent = itemsByParent.get(null) || []
+        if (itemsWithoutParent.length > 0) {
+          const numItemRows = Math.ceil(itemsWithoutParent.length / itemsPerRow)
+          const itemsInWidestRow = Math.min(itemsPerRow, itemsWithoutParent.length)
+          const itemsWidth = itemsInWidestRow * itemWidth + (itemsInWidestRow - 1) * colGap
+          const standaloneWidth = itemsWidth
+          const standaloneHeight = numItemRows * rowHeight
+          
+          allBoxes.push({
+            parent: null,
+            parentItems: itemsWithoutParent,
+            width: standaloneWidth,
+            height: standaloneHeight,
+            isStandalone: true
+          })
+        }
+        
+        // Position all boxes (parent boxes and standalone items) in rows, center-aligning each row
+        let maxYInRow = currentY
+        const currentRowBoxes: Array<{ box: ParentBoxInfo; x: number; y: number }> = []
+        
+        const flushRow = () => {
+          if (currentRowBoxes.length === 0) return
+          
+          // Calculate total width of boxes in this row
+          const totalRowWidth = currentRowBoxes.reduce((sum, b) => sum + b.box.width, 0) + 
+                                (currentRowBoxes.length - 1) * parentGroupGap
+          
+          // Center-align the row
+          const rowStartX = (availableW - totalRowWidth) / 2
+          
+          // Position each box in the centered row
+          let boxX = rowStartX
+          currentRowBoxes.forEach(({ box, y }) => {
+            const groupX = boxX
+            const groupY = y
+            
+            if (!box.isStandalone) {
+              // Parent box - create parent group
+              parentGroups.push({
+                parent: box.parent!,
+                x: groupX,
+                y: groupY,
+                width: box.width,
+                height: box.height,
+                lens: l.key as LensKey
+              })
+              
+              // Position items within parent group
+              const itemsPerRowInBox = Math.max(1, Math.floor((availableW - padding * 2) / 170))
+              const itemWidthInBox = 160
+              box.parentItems.forEach((it, colIdx) => {
+                const col = colIdx % itemsPerRowInBox
+                const row = Math.floor(colIdx / itemsPerRowInBox)
+                const x = groupX + parentGroupPadding + col * (itemWidthInBox + colGap) + itemWidthInBox / 2
+                const y = groupY + parentGroupHeaderHeight + parentGroupPadding + row * rowHeight + nodeHeight / 2
+                if (it.id) positions.set(it.id, { x, y })
+                nodes.push({ ...it, x, y })
+              })
+            } else {
+              // Standalone items - position directly without a box
+              box.parentItems.forEach((it, colIdx) => {
+                const col = colIdx % itemsPerRow
+                const row = Math.floor(colIdx / itemsPerRow)
+                const x = groupX + col * (itemWidth + colGap) + itemWidth / 2
+                const y = groupY + row * rowHeight + nodeHeight / 2
+                if (it.id) positions.set(it.id, { x, y })
+                nodes.push({ ...it, x, y })
+              })
+            }
+            
+            boxX += box.width + parentGroupGap
+          })
+          
+          currentRowBoxes.length = 0
+        }
+        
+        allBoxes.forEach((box) => {
+          // Check if we need to start a new row
+          const wouldFit = currentRowBoxes.length === 0 || 
+            (currentRowBoxes.reduce((sum, b) => sum + b.box.width, 0) + 
+             (currentRowBoxes.length - 1) * parentGroupGap + box.width <= availableW - padding * 2)
+          
+          if (!wouldFit) {
+            flushRow()
+            currentY = maxYInRow + parentGroupGap
+            maxYInRow = currentY
+          }
+          
+          currentRowBoxes.push({ box, x: 0, y: currentY })
+          maxYInRow = Math.max(maxYInRow, currentY + box.height)
+        })
+        
+        flushRow()
+        
+        // Update currentY to the bottom of all items
         currentY = maxYInRow
       } else {
         // Flat list - no parent grouping
-        rowItems.forEach((it, colIdx) => {
-          const col = colIdx % itemsPerRow
-          const row = Math.floor(colIdx / itemsPerRow)
-          const x = padding + col * (itemWidth + colGap) + itemWidth / 2
-          const y = currentY + row * rowHeight + nodeHeight / 2
-          if (it.id) positions.set(it.id, { x, y })
-          nodes.push({ ...it, x, y })
-        })
-        
+        // Center-align items in each row
         const numItemRows = Math.ceil(rowItems.length / itemsPerRow)
+        for (let row = 0; row < numItemRows; row++) {
+          const startIdx = row * itemsPerRow
+          const endIdx = Math.min(startIdx + itemsPerRow, rowItems.length)
+          const itemsInRow = rowItems.slice(startIdx, endIdx)
+          const rowWidth = itemsInRow.length * itemWidth + (itemsInRow.length - 1) * colGap
+          const rowStartX = (availableW - rowWidth) / 2
+          
+          itemsInRow.forEach((it, colIdx) => {
+            const x = rowStartX + colIdx * (itemWidth + colGap) + itemWidth / 2
+            const y = currentY + row * rowHeight + nodeHeight / 2
+            if (it.id) positions.set(it.id, { x, y })
+            nodes.push({ ...it, x, y })
+          })
+        }
+        
         if (numItemRows > 0) {
           currentY += numItemRows * rowHeight + 10 // Gap after items
         }

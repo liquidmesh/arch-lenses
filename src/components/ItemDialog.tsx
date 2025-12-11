@@ -564,7 +564,6 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
                 'Default'
               const sides = getRelationshipSides(baseType)
               const fromRole: RelationshipSideLabel = r.fromItemIdRelationshipType || sides.from
-              const toRole: RelationshipSideLabel = r.toItemIdRelationshipType || sides.to
               const lifecycle: RelationshipLifecycleStatus = r.lifecycleStatus || 'Existing'
               return (
                 <div key={r.id} className="flex items-center gap-2 p-2 border border-slate-200 dark:border-slate-800 rounded">

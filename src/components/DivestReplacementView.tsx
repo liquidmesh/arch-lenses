@@ -297,10 +297,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       // 4. Items with no lifecycle status (unless relationship is "Planned to add")
       const currentItems = dedupeItems(relatedItems).filter(item => {
         const itemId = item.id!
-        const relLifecycle = itemRelLifecycleMap.get(itemId)
+        const relLifecycle: RelationshipLifecycleStatus | undefined = itemRelLifecycleMap.get(itemId)
         
         // Exclude planned-to-add from Current
-        if (relLifecycle === 'Planned to add') return false
+        const isPlannedToAdd = relLifecycle === 'Planned to add'
+        if (isPlannedToAdd) return false
 
         if (item.lifecycleStatus === 'Invest') return true
         
@@ -314,7 +315,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
         
         // Items with no lifecycle status: only exclude if planned-to-add
         if (!item.lifecycleStatus) {
-          return relLifecycle !== 'Planned to add'
+          return !isPlannedToAdd
         }
         
         return false

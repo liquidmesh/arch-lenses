@@ -14,7 +14,7 @@ import { db, getAllPeopleNames, getAllItemNames } from '../db'
 import { type MeetingNote, type Task } from '../types'
 import { Modal } from './Modal'
 import { LENSES } from '../types'
-import { AutocompleteInput } from './AutocompleteInput'
+import { AutocompleteInput, CommaSeparatedAutocompleteInput } from './AutocompleteInput'
 
 // Custom FontSize extension
 const FontSize = Extension.create({
@@ -635,10 +635,10 @@ export function MeetingNoteDialog({ open, onClose, note, onSaved, readonly = fal
             
             <div>
               <label className="block text-sm font-medium mb-1">Participants (comma-separated)</label>
-              <input
-                type="text"
+              <CommaSeparatedAutocompleteInput
                 value={participants}
-                onChange={e => setParticipants(e.target.value)}
+                onChange={setParticipants}
+                suggestions={peopleNames}
                 className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700"
                 placeholder="John Doe, Jane Smith"
               />

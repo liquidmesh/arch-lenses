@@ -1417,13 +1417,31 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             </text>
           </g>
         ))}
-        {/* Links */}
+        {/* Links with labels (relationship type and note) */}
         {((filterToRelated && selectedItemId) ? showRelationshipLines : true) && visibleRels.map((r, i) => {
           const a = posFor(r.fromItemId)
           const b = posFor(r.toItemId)
           const midX = (a.x + b.x) / 2
+          const midY = (a.y + b.y) / 2
+          const key = r.id ? `rel-${r.id}` : `rel-${r.fromItemId}-${r.toItemId}-${i}`
+          const typeLabel = r.relationshipType && r.relationshipType !== 'Default' ? r.relationshipType : null
+          const noteLabel = r.note && r.note.trim() ? r.note.trim() : null
+          const label = [typeLabel, noteLabel].filter(Boolean).join(' • ')
           return (
-            <path key={i} d={`M ${a.x} ${a.y} C ${midX} ${a.y}, ${midX} ${b.y}, ${b.x} ${b.y}`} fill="none" stroke="#3b82f6" strokeWidth={2} />
+            <g key={key}>
+              <path d={`M ${a.x} ${a.y} C ${midX} ${a.y}, ${midX} ${b.y}, ${b.x} ${b.y}`} fill="none" stroke="#3b82f6" strokeWidth={2} />
+              {label && (
+                <text
+                  x={midX}
+                  y={midY - 6}
+                  textAnchor="middle"
+                  className="fill-slate-700 dark:fill-slate-200"
+                  style={{ fontSize: 10, pointerEvents: 'none' }}
+                >
+                  {label}
+                </text>
+              )}
+            </g>
           )
         })}
         

@@ -32,6 +32,7 @@ export const LENSES: LensDefinition[] = DEFAULT_LENSES.map((l, idx) => ({
 }));
 
 export type LifecycleStatus = 'Plan' | 'Emerging' | 'Invest' | 'Divest' | 'Stable'
+export type RelationshipLifecycleStatus = 'Planned to add' | 'Planned to remove' | 'Existing'
 
 export interface Hyperlink {
   label: string;
@@ -57,13 +58,77 @@ export interface ItemRecord {
   updatedAt: number;
 }
 
+export type RelationshipType =
+  | 'Parent-Child'
+  | 'Replaces-Replaced By'
+  | 'Enables-Depends On'
+  | 'Default'
+
+export type RelationshipSideLabel =
+  | 'Parent'
+  | 'Child'
+  | 'Replaces'
+  | 'Replaced By'
+  | 'Enables'
+  | 'Depends On'
+  | 'Default'
+
+const RELATIONSHIP_SIDE_MAP: Record<RelationshipType, { from: RelationshipSideLabel; to: RelationshipSideLabel }> = {
+  'Parent-Child': { from: 'Parent', to: 'Child' },
+  'Replaces-Replaced By': { from: 'Replaces', to: 'Replaced By' },
+  'Enables-Depends On': { from: 'Enables', to: 'Depends On' },
+  Default: { from: 'Default', to: 'Default' },
+}
+
+export function getRelationshipSides(type: RelationshipType | undefined): { from: RelationshipSideLabel; to: RelationshipSideLabel } {
+  if (!type) return { from: 'Default', to: 'Default' }
+  return RELATIONSHIP_SIDE_MAP[type] ?? { from: 'Default', to: 'Default' }
+}
+
+export function getOppositeSideLabel(type: RelationshipType, side: RelationshipSideLabel): RelationshipSideLabel {
+  const sides = getRelationshipSides(type)
+  if (side === sides.from) return sides.to
+  if (side === sides.to) return sides.from
+  return sides.to
+}
+
+export function inferRelationshipTypeFromSide(side: RelationshipSideLabel | undefined): RelationshipType | undefined {
+  if (!side) return undefined
+  const map: Record<RelationshipSideLabel, RelationshipType> = {
+    Parent: 'Parent-Child',
+    Child: 'Parent-Child',
+    Replaces: 'Replaces-Replaced By',
+    'Replaced By': 'Replaces-Replaced By',
+    Enables: 'Enables-Depends On',
+    'Depends On': 'Enables-Depends On',
+    Default: 'Default',
+  }
+  return map[side]
+}
+
+export function getRelationshipTypeOptions(): Array<{ value: RelationshipType; label: RelationshipSideLabel }> {
+  return [
+    { value: 'Parent-Child', label: 'Parent' },
+    { value: 'Parent-Child', label: 'Child' },
+    { value: 'Replaces-Replaced By', label: 'Replaces' },
+    { value: 'Replaces-Replaced By', label: 'Replaced By' },
+    { value: 'Enables-Depends On', label: 'Enables' },
+    { value: 'Enables-Depends On', label: 'Depends On' },
+    { value: 'Default', label: 'Default' },
+  ]
+}
+
 export interface RelationshipRecord {
   id?: number;
   fromLens: LensKey;
   fromItemId: number;
   toLens: LensKey;
   toItemId: number;
-  lifecycleStatus?: LifecycleStatus; // Optional lifecycle status for the relationship
+  lifecycleStatus?: RelationshipLifecycleStatus;
+  relationshipType?: RelationshipType;
+  fromItemIdRelationshipType?: RelationshipSideLabel;
+  toItemIdRelationshipType?: RelationshipSideLabel;
+  note?: string;
   createdAt: number;
 }
 

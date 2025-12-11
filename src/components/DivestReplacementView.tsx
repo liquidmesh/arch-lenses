@@ -1,7 +1,18 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { db, getAllLenses } from '../db'
-import { type ItemRecord, type RelationshipRecord, type LensKey, type LifecycleStatus, LENSES } from '../types'
+import { type ItemRecord, type RelationshipRecord, type LensKey, type LifecycleStatus, type RelationshipLifecycleStatus, LENSES } from '../types'
 import { ItemDialog } from './ItemDialog'
+
+// Deduplicate a list of items by id
+const dedupeItems = (items: ItemRecord[]): ItemRecord[] => {
+  const map = new Map<number, ItemRecord>()
+  items.forEach(item => {
+    if (item.id !== undefined) {
+      map.set(item.id, item)
+    }
+  })
+  return Array.from(map.values())
+}
 
 type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'manage-lenses' | 'tasks' | 'divest-replacement'
 
@@ -158,7 +169,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       })
 
       // Create a map of item ID to relationship lifecycle status
-      const itemRelLifecycleMap = new Map<number, LifecycleStatus | undefined>()
+      const itemRelLifecycleMap = new Map<number, RelationshipLifecycleStatus | undefined>()
       relatedRels.forEach(rel => {
         const itemId = rel.fromItemId === primaryItem.id ? rel.toItemId : rel.fromItemId
         itemRelLifecycleMap.set(itemId, rel.lifecycleStatus)
@@ -263,78 +274,50 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       const itemsWithNoStatus = relatedItems.filter(item => !item.lifecycleStatus)
       
       // Current column: 
-      // 1. Items with lifecycle "Invest" AND relationship with no lifecycle or lifecycle "Divest"
+      // 1. Items with lifecycle "Invest"
       // 2. Items with lifecycle "Divest"
       // 3. Items with lifecycle "Stable"
-      // 4. Items with no lifecycle status (unless relationship is "Plan")
-      const currentItems = relatedItems.filter(item => {
+      // 4. Items with no lifecycle status (unless relationship is "Planned to add")
+      const currentItems = dedupeItems(relatedItems).filter(item => {
         const itemId = item.id!
         const relLifecycle = itemRelLifecycleMap.get(itemId)
         
-        // Rule 1: Items with lifecycle "Invest" AND relationship with no lifecycle or lifecycle "Divest"
-        if (item.lifecycleStatus === 'Invest') {
-          return relLifecycle === undefined || relLifecycle === 'Divest'
-        }
+        // Exclude planned-to-add from Current
+        if (relLifecycle === 'Planned to add') return false
+
+        if (item.lifecycleStatus === 'Invest') return true
         
-        // Rule 2: Items with lifecycle "Divest"
         if (item.lifecycleStatus === 'Divest') {
           return true
         }
         
-        // Rule 3: Items with lifecycle "Stable"
         if (item.lifecycleStatus === 'Stable') {
           return true
         }
         
-        // Rule 4: Items with no lifecycle status (unless relationship is "Plan")
+        // Items with no lifecycle status: only exclude if planned-to-add
         if (!item.lifecycleStatus) {
-          return relLifecycle !== 'Plan'
+          return relLifecycle !== 'Planned to add'
         }
         
         return false
       })
-      
-      // Filter items based on relationship lifecycle:
-      // - Items with relationship lifecycle "Divest" should not appear in Target column
-      // - Items with relationship lifecycle "Plan" should not appear in Current column
-      
-      const replacementItems = relatedItems.filter(item => {
-        const itemId = item.id!
-        const relLifecycle = itemRelLifecycleMap.get(itemId)
-        // Exclude if relationship lifecycle is "Divest" (shouldn't be in Target)
-        if (relLifecycle === 'Divest') return false
-        return (
-          item.lifecycleStatus === 'Emerging' || 
-          item.lifecycleStatus === 'Invest' || 
-          item.lifecycleStatus === 'Plan' ||
-          item.lifecycleStatus === 'Stable'
-        )
-      })
-      // Items with other statuses (excluding Divest and the ones already categorized)
-      const otherItems = relatedItems.filter(item => {
-        const itemId = item.id!
-        const relLifecycle = itemRelLifecycleMap.get(itemId)
-        // Exclude if relationship lifecycle is "Divest" (shouldn't be in Target)
-        if (relLifecycle === 'Divest') return false
-        return (
-          item.lifecycleStatus &&
-          item.lifecycleStatus !== 'Divest' &&
-          item.lifecycleStatus !== 'Emerging' &&
-          item.lifecycleStatus !== 'Invest' &&
-          item.lifecycleStatus !== 'Plan' &&
-          item.lifecycleStatus !== 'Stable'
-        )
-      })
-      // Include items with no status in targetItems for Target column (unless relationship is "Divest")
-      const targetItemsWithNoStatus = [
-        ...replacementItems,
-        ...otherItems,
+
+      // Target includes items unless relationship is planned-to-remove
+      const targetItemsWithNoStatus = dedupeItems([
+        ...relatedItems.filter(item => {
+          const relLifecycle = itemRelLifecycleMap.get(item.id!)
+          if (relLifecycle === 'Planned to remove') return false
+          return true
+        }),
         ...itemsWithNoStatus.filter(item => {
-          const itemId = item.id!
-          const relLifecycle = itemRelLifecycleMap.get(itemId)
-          return relLifecycle !== 'Divest'
-        })
-      ]
+          const relLifecycle = itemRelLifecycleMap.get(item.id!)
+          return relLifecycle !== 'Planned to remove'
+        }),
+      ])
+      // Keep legacy fields for downstream rendering (currently unused but expected)
+      const replacementItems = targetItemsWithNoStatus
+      const otherItems: ItemRecord[] = []
 
       // Apply roll-up grouping if enabled
       if (rollupLens) {
@@ -358,8 +341,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           // Group current and target items by parent
           const rollupGroups = parentNames.map(parentName => {
             const relatedSecondary = parentToSecondaryMap!.get(parentName) || []
-            const groupCurrentItems = currentItems.filter(item => relatedSecondary.includes(item))
-            const groupTargetItems = targetItemsWithNoStatus.filter(item => relatedSecondary.includes(item))
+            const groupCurrentItems = dedupeItems(currentItems.filter(item => relatedSecondary.includes(item)))
+            const groupTargetItems = dedupeItems(targetItemsWithNoStatus.filter(item => relatedSecondary.includes(item)))
             
             // Create a fake rollupItem for parent grouping
             const rollupItem: ItemRecord = {
@@ -391,15 +374,16 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
             // Items without a parent - show these directly instead of under "(No Parent)"
             ungroupedSecondaryItems.push(...[...currentItems, ...targetItemsWithNoStatus].filter(item => !item.parent))
           }
+          const uniqueUngroupedSecondaryItems = dedupeItems(ungroupedSecondaryItems)
           
-          return {
+            return {
             primaryItem,
-            divestItems: currentItems,
-            replacementItems,
-            otherItems,
-            targetItems: targetItemsWithNoStatus,
+              divestItems: dedupeItems(currentItems),
+              replacementItems: dedupeItems(targetItemsWithNoStatus),
+              otherItems,
+              targetItems: dedupeItems(targetItemsWithNoStatus),
             rollupGroups,
-            ungroupedSecondaryItems,
+            ungroupedSecondaryItems: uniqueUngroupedSecondaryItems,
             hasRollup: true,
             itemRelLifecycleMap,
           }
@@ -413,8 +397,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           // Group current and target items by roll-up items
           const rollupGroups = rollupItems.map(rollupItem => {
             const relatedSecondary = rollupToSecondaryMap!.get(rollupItem.id!) || []
-            const groupCurrentItems = currentItems.filter(item => relatedSecondary.includes(item))
-            const groupTargetItems = targetItemsWithNoStatus.filter(item => relatedSecondary.includes(item))
+            const groupCurrentItems = dedupeItems(currentItems.filter(item => relatedSecondary.includes(item)))
+            const groupTargetItems = dedupeItems(targetItemsWithNoStatus.filter(item => relatedSecondary.includes(item)))
             
             return {
               rollupItem,
@@ -448,15 +432,16 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               }
             })
           }
+          const uniqueUngroupedSecondaryItems = dedupeItems(ungroupedSecondaryItems)
           
-          return {
+            return {
             primaryItem,
-            divestItems: currentItems, // Keep for backward compatibility
-            replacementItems,
-            otherItems,
-            targetItems: targetItemsWithNoStatus, // Keep for backward compatibility
+              divestItems: dedupeItems(currentItems), // Keep for backward compatibility
+              replacementItems: dedupeItems(replacementItems),
+              otherItems,
+              targetItems: dedupeItems(targetItemsWithNoStatus), // Keep for backward compatibility
             rollupGroups,
-            ungroupedSecondaryItems,
+            ungroupedSecondaryItems: uniqueUngroupedSecondaryItems,
             hasRollup: true,
             itemRelLifecycleMap, // Include for categorizing ungrouped items
           }
@@ -465,10 +450,10 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
 
       return {
         primaryItem,
-        divestItems: currentItems, // Current column items
-        replacementItems,
+        divestItems: dedupeItems(currentItems), // Current column items
+        replacementItems: dedupeItems(replacementItems),
         otherItems,
-        targetItems: targetItemsWithNoStatus,
+        targetItems: dedupeItems(targetItemsWithNoStatus),
         hasRollup: false,
         itemRelLifecycleMap, // Include for consistency
       }

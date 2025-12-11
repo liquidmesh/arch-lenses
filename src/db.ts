@@ -78,21 +78,16 @@ class ArchLensesDB extends Dexie {
       lenses: '++id, key, order, updatedAt',
     }).upgrade(async (tx) => {
       // Migrate default lenses to database
-      try {
-        const now = Date.now()
-        const existingLenses = await tx.table('lenses').toArray()
-        if (existingLenses.length === 0) {
-          const defaultLenses = DEFAULT_LENSES.map((lens, idx) => ({
-            ...lens,
-            order: idx,
-            createdAt: now,
-            updatedAt: now,
-          }))
-          await tx.table('lenses').bulkAdd(defaultLenses)
-        }
-      } catch (error) {
-        console.error('Error seeding lenses in migration:', error)
-        // Continue even if seeding fails - seedIfEmpty will handle it
+      const now = Date.now()
+      const existingLenses = await tx.table('lenses').toArray()
+      if (existingLenses.length === 0) {
+        const defaultLenses = DEFAULT_LENSES.map((lens, idx) => ({
+          ...lens,
+          order: idx,
+          createdAt: now,
+          updatedAt: now,
+        }))
+        await tx.table('lenses').bulkAdd(defaultLenses)
       }
     })
     // Version 10: Make meetingNoteId optional in tasks (allow standalone tasks)
@@ -139,154 +134,93 @@ class ArchLensesDB extends Dexie {
       tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
       lenses: '++id, key, order, updatedAt',
     })
-    // Version 14: Add unique constraint on lenses.key and clean up duplicates
+    // Version 14: no-op placeholder for earlier unique lens work
     this.version(14).stores({
       items: '++id, &[lens+name], lens, name, updatedAt',
       relationships: '++id, fromLens, fromItemId, toLens, toItemId',
       teamMembers: '++id, name, manager, team, updatedAt',
       meetingNotes: '++id, dateTime, createdAt, updatedAt',
       tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
-      lenses: '++id, &key, order, updatedAt',
-    }).upgrade(async (tx) => {
-      try {
-        // Clean up duplicate lenses (keep the first one for each key, ordered by id)
-        const allLenses = await tx.table('lenses').orderBy('id').toArray()
-        const seen = new Map<string, number>()
-        const duplicates: number[] = []
-        
-        for (const lens of allLenses) {
-          if (lens.id === undefined) continue
-          if (seen.has(lens.key)) {
-            // This is a duplicate, mark for deletion
-            duplicates.push(lens.id)
-          } else {
-            seen.set(lens.key, lens.id)
-          }
-        }
-        
-        // Delete duplicates (only if we have lenses to keep)
-        if (duplicates.length > 0 && seen.size > 0) {
-          await tx.table('lenses').bulkDelete(duplicates)
-        }
-        
-        // If no lenses exist after cleanup, seed them
-        const remainingLenses = await tx.table('lenses').toArray()
-        if (remainingLenses.length === 0) {
-          const now = Date.now()
-          const defaultLenses = DEFAULT_LENSES.map((lens, idx) => ({
-            ...lens,
-            order: idx,
-            createdAt: now,
-            updatedAt: now,
-          }))
-          await tx.table('lenses').bulkAdd(defaultLenses)
-        }
-      } catch (error) {
-        console.error('Error in version 14 migration:', error)
-        // If migration fails, seedIfEmpty will handle seeding
+      lenses: '++id, key, order, updatedAt',
+    })
+    // Version 15: Add relationshipType and note (no index change)
+    this.version(15).stores({
+      items: '++id, &[lens+name], lens, name, updatedAt',
+      relationships: '++id, fromLens, fromItemId, toLens, toItemId',
+      teamMembers: '++id, name, manager, team, updatedAt',
+      meetingNotes: '++id, dateTime, createdAt, updatedAt',
+      tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
+      lenses: '++id, key, order, updatedAt',
+    })
+    // Version 16: Add from/to relationship side fields (no index change)
+    this.version(16).stores({
+      items: '++id, &[lens+name], lens, name, updatedAt',
+      relationships: '++id, fromLens, fromItemId, toLens, toItemId',
+      teamMembers: '++id, name, manager, team, updatedAt',
+      meetingNotes: '++id, dateTime, createdAt, updatedAt',
+      tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
+      lenses: '++id, key, order, updatedAt',
+    }).upgrade(async tx => {
+      const relationships = await tx.table('relationships').toArray()
+      const map: Record<string, { from: string; to: string }> = {
+        'Parent-Child': { from: 'Parent', to: 'Child' },
+        'Replaces-Replaced By': { from: 'Replaces', to: 'Replaced By' },
+        'Enables-Depends On': { from: 'Enables', to: 'Depends On' },
+        Default: { from: 'Default', to: 'Default' },
       }
+      for (const rel of relationships) {
+        const sides = map[(rel as any).relationshipType as string] || map.Default
+        await tx.table('relationships').update(rel.id!, {
+          fromItemIdRelationshipType: sides.from,
+          toItemIdRelationshipType: sides.to,
+        })
+      }
+    })
+    // Version 17: Relationship lifecycle fidelity
+    this.version(17).stores({
+      items: '++id, &[lens+name], lens, name, updatedAt',
+      relationships: '++id, fromLens, fromItemId, toLens, toItemId',
+      teamMembers: '++id, name, manager, team, updatedAt',
+      meetingNotes: '++id, dateTime, createdAt, updatedAt',
+      tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
+      lenses: '++id, key, order, updatedAt',
+    }).upgrade(async tx => {
+      const relationships = await tx.table('relationships').toArray()
+      for (const rel of relationships) {
+        const current = (rel as any).lifecycleStatus
+        let mapped: 'Planned to add' | 'Planned to remove' | 'Existing'
+        if (!current) mapped = 'Existing'
+        else if (current === 'Plan' || current === 'Planned to add') mapped = 'Planned to add'
+        else mapped = 'Existing'
+        await tx.table('relationships').update(rel.id!, { lifecycleStatus: mapped })
+      }
+    })
+    // Version 18: Add compound index for relationship queries by fromItemId+toItemId
+    this.version(18).stores({
+      items: '++id, &[lens+name], lens, name, updatedAt',
+      relationships: '++id,[fromItemId+toItemId],fromLens,fromItemId,toLens,toItemId',
+      teamMembers: '++id, name, manager, team, updatedAt',
+      meetingNotes: '++id, dateTime, createdAt, updatedAt',
+      tasks: '++id, meetingNoteId, assignedTo, completedAt, createdAt, updatedAt',
+      lenses: '++id, key, order, updatedAt',
     })
   }
 }
 
 export const db = new ArchLensesDB()
 
-// Helper function to ensure database is ready
-export async function ensureDbReady(): Promise<void> {
-  try {
-    if (!db.isOpen()) {
-      console.log('Database not open, opening...')
-      await db.open()
-      console.log('Database opened successfully')
-    }
-    // Test database access by trying to read from a table
-    const lensCount = await db.lenses.count()
-    console.log(`Database ready, lens count: ${lensCount}`)
-  } catch (error) {
-    console.error('Database not ready:', error)
-    // Try to reopen
-    try {
-      console.log('Attempting to close and reopen database...')
-      await db.close()
-      await db.open()
-      console.log('Database reopened successfully')
-      // Test again
-      await db.lenses.count()
-    } catch (reopenError) {
-      console.error('Failed to reopen database:', reopenError)
-      throw new Error(`Database is not accessible: ${reopenError instanceof Error ? reopenError.message : String(reopenError)}. Please refresh the page or clear your browser's IndexedDB storage.`)
-    }
-  }
-}
-
 export async function seedIfEmpty(): Promise<void> {
-  try {
-    // Ensure database is open
-    if (!db.isOpen()) {
-      await db.open()
-    }
-    
-    // Seed lenses if empty (check by key to avoid duplicates)
-    const existingLenses = await db.lenses.toArray()
-    const existingKeys = new Set(existingLenses.map(l => l.key))
-    
-    if (existingKeys.size === 0) {
-      // No lenses exist, seed all defaults
-      const now = Date.now()
-      const defaultLenses = DEFAULT_LENSES.map((lens, idx) => ({
-        ...lens,
-        order: idx,
-        createdAt: now,
-        updatedAt: now,
-      }))
-      try {
-        await db.lenses.bulkAdd(defaultLenses)
-      } catch (error) {
-        // If bulkAdd fails (e.g., due to unique constraint), try adding one by one
-        console.warn('Bulk add failed, trying individual adds:', error)
-        for (const lens of defaultLenses) {
-          try {
-            await db.lenses.add(lens)
-          } catch (err) {
-            // Ignore duplicate key errors
-            if (!(err instanceof Error && err.name === 'ConstraintError')) {
-              console.error('Error adding lens:', lens.key, err)
-            }
-          }
-        }
-      }
-    } else {
-      // Some lenses exist, only add missing ones
-      const now = Date.now()
-      const missingLenses = DEFAULT_LENSES
-        .filter(lens => !existingKeys.has(lens.key))
-        .map((lens, idx) => ({
-          ...lens,
-          order: existingLenses.length + idx,
-          createdAt: now,
-          updatedAt: now,
-        }))
-      if (missingLenses.length > 0) {
-        try {
-          await db.lenses.bulkAdd(missingLenses)
-        } catch (error) {
-          // If bulkAdd fails, try adding one by one
-          console.warn('Bulk add failed, trying individual adds:', error)
-          for (const lens of missingLenses) {
-            try {
-              await db.lenses.add(lens)
-            } catch (err) {
-              // Ignore duplicate key errors
-              if (!(err instanceof Error && err.name === 'ConstraintError')) {
-                console.error('Error adding lens:', lens.key, err)
-              }
-            }
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error in seedIfEmpty:', error)
+  // Seed lenses if empty
+  const lensCount = await db.lenses.count()
+  if (lensCount === 0) {
+    const now = Date.now()
+    const defaultLenses = DEFAULT_LENSES.map((lens, idx) => ({
+      ...lens,
+      order: idx,
+      createdAt: now,
+      updatedAt: now,
+    }))
+    await db.lenses.bulkAdd(defaultLenses)
   }
   
   const count = await db.items.count()
@@ -298,53 +232,7 @@ export async function seedIfEmpty(): Promise<void> {
 
 // Helper function to get all lenses
 export async function getAllLenses(): Promise<LensDefinition[]> {
-  try {
-    // Ensure database is open
-    if (!db.isOpen()) {
-      await db.open()
-    }
-    
-    let allLenses: LensDefinition[] = []
-    try {
-      allLenses = await db.lenses.orderBy('order').toArray()
-    } catch (error) {
-      // If orderBy fails (e.g., index not ready), try without ordering
-      console.warn('orderBy failed, trying without order:', error)
-      allLenses = await db.lenses.toArray()
-    }
-    
-    // If no lenses found, try seeding
-    if (allLenses.length === 0) {
-      console.warn('No lenses found in database, attempting to seed...')
-      await seedIfEmpty()
-      // Try again after seeding
-      try {
-        allLenses = await db.lenses.orderBy('order').toArray()
-      } catch (error) {
-        allLenses = await db.lenses.toArray()
-      }
-    }
-    
-    // Deduplicate by key (keep the first occurrence of each key)
-    const seen = new Map<string, LensDefinition>()
-    for (const lens of allLenses) {
-      if (!seen.has(lens.key)) {
-        seen.set(lens.key, lens)
-      }
-    }
-    const result = Array.from(seen.values())
-    // Sort by order if available, otherwise by key
-    result.sort((a, b) => {
-      if (a.order !== undefined && b.order !== undefined) {
-        return a.order - b.order
-      }
-      return a.key.localeCompare(b.key)
-    })
-    return result
-  } catch (error) {
-    console.error('Error in getAllLenses:', error)
-    return []
-  }
+  return await db.lenses.orderBy('order').toArray()
 }
 
 // Helper function to get lens by key
@@ -377,4 +265,14 @@ export async function getAllItemNames(): Promise<Array<{ id: number; name: strin
     name: item.name,
     lens: item.lens
   })).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+
+// Ensure database is open and ready
+export async function ensureDbReady(): Promise<void> {
+  if (!db.isOpen()) {
+    await db.open()
+  }
+  // Touch a table to verify access
+  await db.lenses.count()
 }

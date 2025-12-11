@@ -113,7 +113,7 @@ export function Sidebar({ visible, onToggle, onShowAll, onHideAll, onFilterLens,
             <div className="flex-1 flex items-center gap-2">
               <input
                 type="checkbox"
-                checked={visible[l.key]}
+                checked={visible[l.key] ?? false}
                 onChange={() => onToggle(l.key)}
                 className="cursor-pointer"
                 onClick={(e) => e.stopPropagation()}

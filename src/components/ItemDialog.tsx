@@ -1,8 +1,23 @@
-import { useEffect, useState } from 'react'
-import { db, getAllItemNames, getAllPeopleNames, getAllLenses } from '../db'
-import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type MeetingNote, type Hyperlink, type Task } from '../types'
+import { useEffect, useMemo, useState } from 'react'
+import { db, getAllItemNames, getAllPeopleNames } from '../db'
+import {
+  LENSES,
+  type ItemRecord,
+  type LensKey,
+  type RelationshipRecord,
+  type LifecycleStatus,
+  type MeetingNote,
+  type Hyperlink,
+  type Task,
+  type RelationshipType,
+  type RelationshipSideLabel,
+  type RelationshipLifecycleStatus,
+  getRelationshipSides,
+  getOppositeSideLabel,
+  inferRelationshipTypeFromSide,
+} from '../types'
 import { Modal } from './Modal'
-import { AutocompleteInput } from './AutocompleteInput'
+import { AutocompleteInput, CommaSeparatedAutocompleteInput } from './AutocompleteInput'
 import { TaskDialog } from './TaskDialog'
 
 interface ItemDialogProps {
@@ -34,7 +49,6 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
   const [allItems, setAllItems] = useState<ItemRecord[]>([]) // For parent autocomplete
   const [peopleNames, setPeopleNames] = useState<string[]>([]) // For people autocomplete
   const [managerNames, setManagerNames] = useState<string[]>([]) // For architecture manager autocomplete
-  const [lensOptions, setLensOptions] = useState<Array<{ key: LensKey; label: string }>>([]) // For target lens dropdown
 
   // Relationships (outgoing from this item)
   const [rels, setRels] = useState<RelationshipRecord[]>([])
@@ -186,27 +200,21 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
       })
       setManagerNames(Array.from(managers).sort())
     }
-    async function loadLenses() {
-      try {
-        const lenses = await getAllLenses()
-        setLensOptions(lenses.map(l => ({ key: l.key, label: l.label })))
-      } catch (error) {
-        console.error('Error loading lenses:', error)
-        // Fallback to static LENSES if database fails
-        setLensOptions(LENSES.map(l => ({ key: l.key, label: l.label })))
-      }
-    }
     if (open) {
       loadAllItems()
       loadPeopleNames()
       loadManagerNames()
-      loadLenses()
     }
   }, [open])
 
+  const lensOptions = useMemo(() => LENSES, [])
   const [targetLens, setTargetLens] = useState<LensKey>('channels')
   const [targetQuery, setTargetQuery] = useState('')
   const [targetItems, setTargetItems] = useState<ItemRecord[]>([])
+  const [newRelationshipType, setNewRelationshipType] = useState<RelationshipType>('Parent-Child')
+  const [newRelationshipRole, setNewRelationshipRole] = useState<RelationshipSideLabel | ''>('')
+  const [newRelationshipNote, setNewRelationshipNote] = useState('')
+  const BASE_RELATIONSHIP_TYPES: RelationshipType[] = ['Parent-Child', 'Replaces-Replaced By', 'Enables-Depends On', 'Default']
 
   useEffect(() => {
     async function loadTargets() {
@@ -220,15 +228,48 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
   async function addRelationship(toItemId: number, toLens: LensKey) {
     if (!item?.id) return
     const now = Date.now()
+    const baseType: RelationshipType = newRelationshipType || 'Default'
+    const sides = getRelationshipSides(baseType)
+    const fromSide: RelationshipSideLabel = newRelationshipRole || sides.from
+    const toSide: RelationshipSideLabel = getOppositeSideLabel(baseType, fromSide)
+    const lifecycleStatus: RelationshipLifecycleStatus = 'Existing'
+    const note = newRelationshipNote.trim() || undefined
+
     // prevent duplicates both directions
     const existing = await db.relationships.where({ fromItemId: item.id, toItemId }).first()
     if (!existing) {
-      await db.relationships.add({ fromLens: lens, fromItemId: item.id, toLens, toItemId, lifecycleStatus: undefined, createdAt: now })
+      await db.relationships.add({
+        fromLens: lens,
+        fromItemId: item.id,
+        toLens,
+        toItemId,
+        lifecycleStatus,
+        relationshipType: baseType,
+        fromItemIdRelationshipType: fromSide,
+        toItemIdRelationshipType: toSide,
+        note,
+        createdAt: now,
+      })
     }
     const reverseExisting = await db.relationships.where({ fromItemId: toItemId, toItemId: item.id }).first()
     if (!reverseExisting) {
-      await db.relationships.add({ fromLens: toLens, fromItemId: toItemId, toLens: lens, toItemId: item.id, lifecycleStatus: undefined, createdAt: now })
+      await db.relationships.add({
+        fromLens: toLens,
+        fromItemId: toItemId,
+        toLens: lens,
+        toItemId: item.id,
+        lifecycleStatus,
+        relationshipType: baseType,
+        fromItemIdRelationshipType: toSide,
+        toItemIdRelationshipType: fromSide,
+        note,
+        createdAt: now,
+      })
     }
+    // Clear fields
+    setNewRelationshipType('Parent-Child')
+    setNewRelationshipRole('')
+    setNewRelationshipNote('')
     const updated = await db.relationships.where({ fromItemId: item.id }).toArray()
     setRels(updated)
     // Reload related items
@@ -257,6 +298,18 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
       if (relatedItem) itemsMap.set(rel.toItemId, relatedItem)
     }
     setRelatedItems(itemsMap)
+  }
+
+  async function updateRelationshipNote(rel: RelationshipRecord, noteValue: string) {
+    if (!rel.id || !item?.id) return
+    const note = noteValue === '' ? undefined : noteValue
+    await db.relationships.update(rel.id, { note })
+    const reverse = await db.relationships.where({ fromItemId: rel.toItemId, toItemId: rel.fromItemId }).first()
+    if (reverse?.id) {
+      await db.relationships.update(reverse.id, { note })
+    }
+    const updated = await db.relationships.where({ fromItemId: item.id }).toArray()
+    setRels(updated)
   }
 
   async function save() {
@@ -388,7 +441,13 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
           />
         </Field>
         <Field label="Secondary SME Architects (comma separated)">
-          <input value={secondaryArchitectsText} onChange={e => setSecondaryArchitectsText(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" />
+          <CommaSeparatedAutocompleteInput
+            value={secondaryArchitectsText}
+            onChange={setSecondaryArchitectsText}
+            suggestions={peopleNames}
+            className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700"
+            placeholder="Name, another name"
+          />
         </Field>
         <Field label="Architecture Manager">
           <AutocompleteInput
@@ -498,23 +557,41 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
             {rels.length === 0 && <span className="text-slate-500 text-sm">No relationships</span>}
             {rels.map(r => {
               const relatedItem = relatedItems.get(r.toItemId)
+              const baseType: RelationshipType =
+                r.relationshipType ||
+                inferRelationshipTypeFromSide(r.fromItemIdRelationshipType) ||
+                inferRelationshipTypeFromSide(r.toItemIdRelationshipType) ||
+                'Default'
+              const sides = getRelationshipSides(baseType)
+              const fromRole: RelationshipSideLabel = r.fromItemIdRelationshipType || sides.from
+              const toRole: RelationshipSideLabel = r.toItemIdRelationshipType || sides.to
+              const lifecycle: RelationshipLifecycleStatus = r.lifecycleStatus || 'Existing'
               return (
                 <div key={r.id} className="flex items-center gap-2 p-2 border border-slate-200 dark:border-slate-800 rounded">
                   <span className="flex-1 text-sm">
                     {lensLabel(r.toLens)}: {relatedItem?.name || `#${r.toItemId}`}
                   </span>
                   <select
-                    value={r.lifecycleStatus || ''}
+                    value={baseType}
                     onChange={async (e) => {
-                      const newStatus = e.target.value || undefined
+                      const nextType = e.target.value as RelationshipType
+                      const nextSides = getRelationshipSides(nextType)
+                      const nextFrom = nextSides.from
+                      const nextTo = nextSides.to
                       if (r.id) {
-                        await db.relationships.update(r.id, { lifecycleStatus: newStatus as LifecycleStatus | undefined })
-                        // Update reverse relationship if it exists
+                        await db.relationships.update(r.id, {
+                          relationshipType: nextType,
+                          fromItemIdRelationshipType: nextFrom,
+                          toItemIdRelationshipType: nextTo,
+                        })
                         const reverse = await db.relationships.where({ fromItemId: r.toItemId, toItemId: r.fromItemId }).first()
                         if (reverse?.id) {
-                          await db.relationships.update(reverse.id, { lifecycleStatus: newStatus as LifecycleStatus | undefined })
+                          await db.relationships.update(reverse.id, {
+                            relationshipType: nextType,
+                            fromItemIdRelationshipType: nextTo,
+                            toItemIdRelationshipType: nextFrom,
+                          })
                         }
-                        // Reload relationships
                         if (item?.id) {
                           const updated = await db.relationships.where({ fromItemId: item.id }).toArray()
                           setRels(updated)
@@ -523,12 +600,75 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
                     }}
                     className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                   >
-                    <option value="">(None)</option>
-                    <option value="Plan">Plan</option>
-                    <option value="Emerging">Emerging</option>
-                    <option value="Invest">Invest</option>
-                    <option value="Divest">Divest</option>
-                    <option value="Stable">Stable</option>
+                    {BASE_RELATIONSHIP_TYPES.map(opt => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                  {baseType !== 'Default' && (
+                    <select
+                      value={fromRole}
+                      onChange={async (e) => {
+                        const selectedRole = e.target.value as RelationshipSideLabel
+                        const inferredType = inferRelationshipTypeFromSide(selectedRole) || baseType
+                        const normalized = getRelationshipSides(inferredType)
+                        const nextFrom = selectedRole
+                        const nextTo = getOppositeSideLabel(inferredType, selectedRole) || normalized.to
+                        if (r.id) {
+                          await db.relationships.update(r.id, {
+                            relationshipType: inferredType,
+                            fromItemIdRelationshipType: nextFrom,
+                            toItemIdRelationshipType: nextTo,
+                          })
+                          const reverse = await db.relationships.where({ fromItemId: r.toItemId, toItemId: r.fromItemId }).first()
+                          if (reverse?.id) {
+                            await db.relationships.update(reverse.id, {
+                              relationshipType: inferredType,
+                              fromItemIdRelationshipType: nextTo,
+                              toItemIdRelationshipType: nextFrom,
+                            })
+                          }
+                          if (item?.id) {
+                            const updated = await db.relationships.where({ fromItemId: item.id }).toArray()
+                            setRels(updated)
+                          }
+                        }
+                      }}
+                      className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    >
+                      {[sides.from, sides.to].map((role, idx) => (
+                        <option key={`${role}-${idx}`} value={role}>{role}</option>
+                      ))}
+                    </select>
+                  )}
+          <input
+            value={r.note || ''}
+            onChange={async e => {
+              await updateRelationshipNote(r, e.target.value)
+            }}
+            className="flex-1 min-w-[120px] px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700"
+            placeholder="Note"
+          />
+                  <select
+                    value={lifecycle}
+                    onChange={async (e) => {
+                      const newStatus = e.target.value as RelationshipLifecycleStatus
+                      if (r.id) {
+                        await db.relationships.update(r.id, { lifecycleStatus: newStatus })
+                        const reverse = await db.relationships.where({ fromItemId: r.toItemId, toItemId: r.fromItemId }).first()
+                        if (reverse?.id) {
+                          await db.relationships.update(reverse.id, { lifecycleStatus: newStatus })
+                        }
+                        if (item?.id) {
+                          const updated = await db.relationships.where({ fromItemId: item.id }).toArray()
+                          setRels(updated)
+                        }
+                      }
+                    }}
+                    className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  >
+                    <option value="Planned to add">Planned to add</option>
+                    <option value="Planned to remove">Planned to remove</option>
+                    <option value="Existing">Existing</option>
                   </select>
                   <button className="px-2 py-1 text-xs rounded border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => removeRelationship(r.id)}>Remove</button>
                 </div>
@@ -539,12 +679,49 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
             <div>
               <label className="block text-xs mb-1">Target lens</label>
               <select value={targetLens} onChange={e => setTargetLens(e.target.value as LensKey)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700">
-                {lensOptions.map((o: { key: LensKey; label: string }) => (
+                {lensOptions.map(o => (
                   <option key={o.key} value={o.key}>{o.label}</option>
                 ))}
               </select>
             </div>
             <div className="md:col-span-2">
+              <label className="block text-xs mb-1">Relationship type / role / note</label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                <select
+                  value={newRelationshipType}
+                  onChange={e => {
+                    const next = e.target.value as RelationshipType
+                    setNewRelationshipType(next)
+                    const sides = getRelationshipSides(next)
+                    setNewRelationshipRole(sides.from)
+                  }}
+                  className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700"
+                >
+                  {BASE_RELATIONSHIP_TYPES.map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+                {newRelationshipType !== 'Default' && (
+                  <select
+                    value={newRelationshipRole}
+                    onChange={e => setNewRelationshipRole(e.target.value as RelationshipSideLabel)}
+                    className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700"
+                  >
+                    {(() => {
+                      const sides = getRelationshipSides(newRelationshipType)
+                      return [sides.from, sides.to].map((role, idx) => (
+                        <option key={`${role}-${idx}`} value={role}>{role}</option>
+                      ))
+                    })()}
+                  </select>
+                )}
+                <input
+                  value={newRelationshipNote}
+                  onChange={e => setNewRelationshipNote(e.target.value)}
+                  className="flex-1 min-w-[150px] px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700"
+                  placeholder="Note (optional)"
+                />
+              </div>
               <label className="block text-xs mb-1">Search target items</label>
               <input value={targetQuery} onChange={e => setTargetQuery(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" placeholder="Type to search..." />
               <div className="mt-2 max-h-40 overflow-auto border border-slate-200 dark:border-slate-800 rounded">

@@ -9,14 +9,15 @@ import { GraphModal } from './components/GraphModal'
 import { TeamModal } from './components/TeamModal'
 import { TeamManager } from './components/TeamManager'
 import { MeetingNotesModal } from './components/MeetingNotesModal'
-import { LensManager } from './components/LensManager'
+import { Settings } from './components/Settings'
+import { loadTheme, applyTheme } from './utils/theme'
 import { TasksModal } from './components/TasksModal'
 import { DivestReplacementView } from './components/DivestReplacementView'
 import { invalidateLensesCache, getLensOrderSync } from './utils/lensOrder'
 import { getAllLenses } from './db'
 import { Modal } from './components/Modal'
 
-type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'manage-lenses' | 'tasks' | 'divest-replacement'
+type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'settings' | 'tasks' | 'divest-replacement'
 
 function App() {
   const [lenses, setLenses] = useState<LensDefinition[]>(LENSES)
@@ -76,6 +77,10 @@ function App() {
   useEffect(() => {
     async function init() {
       try {
+        // Load and apply theme
+        const theme = loadTheme()
+        applyTheme(theme)
+        
         // Ensure database is ready (open and migrations complete)
         await ensureDbReady()
         await seedIfEmpty()
@@ -111,7 +116,7 @@ function App() {
     }
   }, [])
   
-  // Reload lenses when returning from manage-lenses view
+  // Reload lenses when returning from settings view
   useEffect(() => {
     if (currentView === 'main') {
       reloadLenses()
@@ -433,8 +438,8 @@ function App() {
             }}
           />
         )}
-        {currentView === 'manage-lenses' && (
-          <LensManager onNavigate={handleNavigate} />
+        {currentView === 'settings' && (
+          <Settings onNavigate={handleNavigate} />
         )}
         {currentView === 'tasks' && (
           <TasksModal

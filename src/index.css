@@ -2,6 +2,24 @@
 
 :root {
   color-scheme: light dark;
+  
+  /* Theme variables - will be set dynamically by theme system */
+  --theme-primary: #3b82f6;
+  --theme-secondary: #64748b;
+  --theme-accent: #8b5cf6;
+  --theme-background: #f8fafc;
+  --theme-surface: #ffffff;
+  --theme-text: #1e293b;
+  --theme-text-secondary: #64748b;
+  --theme-border: #cbd5e1;
+  --theme-success: #10b981;
+  --theme-warning: #f59e0b;
+  --theme-error: #ef4444;
+  --theme-info: #3b82f6;
+  
+  --theme-font-heading: system-ui, -apple-system, sans-serif;
+  --theme-font-body: system-ui, -apple-system, sans-serif;
+  --theme-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 html, body, #root {

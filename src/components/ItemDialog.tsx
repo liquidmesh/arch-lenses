@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { db, getAllItemNames, getAllPeopleNames } from '../db'
+import { db, getAllItemNames, getAllPeopleNames, getAllLenses } from '../db'
 import {
   LENSES,
   type ItemRecord,
   type LensKey,
+  type LensDefinition,
   type RelationshipRecord,
   type LifecycleStatus,
   type MeetingNote,
@@ -45,10 +46,8 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
   const [skillsGaps, setSkillsGaps] = useState(item?.skillsGaps || '')
   const [parent, setParent] = useState(item?.parent || '')
   const [hyperlinks, setHyperlinks] = useState<Hyperlink[]>(item?.hyperlinks || [])
-  const [architectureManager, setArchitectureManager] = useState(item?.architectureManager || '')
   const [allItems, setAllItems] = useState<ItemRecord[]>([]) // For parent autocomplete
   const [peopleNames, setPeopleNames] = useState<string[]>([]) // For people autocomplete
-  const [managerNames, setManagerNames] = useState<string[]>([]) // For architecture manager autocomplete
 
   // Relationships (outgoing from this item)
   const [rels, setRels] = useState<RelationshipRecord[]>([])
@@ -56,6 +55,16 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
   const [referencedNotes, setReferencedNotes] = useState<MeetingNote[]>([])
   const [relatedTasks, setRelatedTasks] = useState<Task[]>([])
   const [itemMap, setItemMap] = useState<Map<number, { name: string; lens: string }>>(new Map())
+
+  // Lens options for target lens dropdown
+  const [lensOptions, setLensOptions] = useState<LensDefinition[]>(LENSES)
+  const [targetLens, setTargetLens] = useState<LensKey>('channels')
+  const [targetQuery, setTargetQuery] = useState('')
+  const [targetItems, setTargetItems] = useState<ItemRecord[]>([])
+  const [newRelationshipType, setNewRelationshipType] = useState<RelationshipType>('Default')
+  const [newRelationshipRole, setNewRelationshipRole] = useState<RelationshipSideLabel | ''>('')
+  const [newRelationshipNote, setNewRelationshipNote] = useState('')
+  const BASE_RELATIONSHIP_TYPES: RelationshipType[] = ['Parent-Child', 'Replaces-Replaced By', 'Enables-Depends On', 'Default']
 
   useEffect(() => {
     // Reset fields on item change
@@ -70,7 +79,6 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
     setSkillsGaps(item?.skillsGaps || '')
     setParent(item?.parent || '')
     setHyperlinks(item?.hyperlinks || [])
-    setArchitectureManager(item?.architectureManager || '')
     if (item?.id) {
       const itemId = item.id
       async function loadData() {
@@ -180,41 +188,36 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
       const names = await getAllPeopleNames()
       setPeopleNames(names)
     }
-    async function loadManagerNames() {
-      // Get all team members who are managers (have people reporting to them)
-      const teamMembers = await db.teamMembers.toArray()
-      const managers = new Set<string>()
-      teamMembers.forEach(member => {
-        // Check if this member has anyone reporting to them
-        const hasReports = teamMembers.some(m => m.manager === member.name)
-        if (hasReports) {
-          managers.add(member.name)
-        }
-      })
-      // Also include any architecture managers from items (in case they're not in team members)
-      const items = await db.items.toArray()
-      items.forEach(item => {
-        if (item.architectureManager) {
-          managers.add(item.architectureManager)
-        }
-      })
-      setManagerNames(Array.from(managers).sort())
+    async function loadLenses() {
+      const dbLenses = await getAllLenses()
+      if (dbLenses.length > 0) {
+        setLensOptions(dbLenses)
+      } else {
+        setLensOptions(LENSES)
+      }
     }
     if (open) {
       loadAllItems()
       loadPeopleNames()
-      loadManagerNames()
+      loadLenses()
     }
   }, [open])
 
-  const lensOptions = useMemo(() => LENSES, [])
-  const [targetLens, setTargetLens] = useState<LensKey>('channels')
-  const [targetQuery, setTargetQuery] = useState('')
-  const [targetItems, setTargetItems] = useState<ItemRecord[]>([])
-  const [newRelationshipType, setNewRelationshipType] = useState<RelationshipType>('Parent-Child')
-  const [newRelationshipRole, setNewRelationshipRole] = useState<RelationshipSideLabel | ''>('')
-  const [newRelationshipNote, setNewRelationshipNote] = useState('')
-  const BASE_RELATIONSHIP_TYPES: RelationshipType[] = ['Parent-Child', 'Replaces-Replaced By', 'Enables-Depends On', 'Default']
+  // Listen for lens updates
+  useEffect(() => {
+    async function handleLensesUpdated() {
+      const dbLenses = await getAllLenses()
+      if (dbLenses.length > 0) {
+        setLensOptions(dbLenses)
+      } else {
+        setLensOptions(LENSES)
+      }
+    }
+    window.addEventListener('lensesUpdated', handleLensesUpdated)
+    return () => {
+      window.removeEventListener('lensesUpdated', handleLensesUpdated)
+    }
+  }, [])
 
   useEffect(() => {
     async function loadTargets() {
@@ -267,7 +270,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
       })
     }
     // Clear fields
-    setNewRelationshipType('Parent-Child')
+    setNewRelationshipType('Default')
     setNewRelationshipRole('')
     setNewRelationshipNote('')
     const updated = await db.relationships.where({ fromItemId: item.id }).toArray()
@@ -337,7 +340,6 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
           skillsGaps,
           parent: parent.trim() || undefined,
           hyperlinks: hyperlinks.length > 0 ? hyperlinks : undefined,
-          architectureManager: architectureManager.trim() || undefined,
           createdAt: now,
           updatedAt: now,
         })
@@ -367,12 +369,6 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
           updateData.hyperlinks = validHyperlinks.length > 0 ? validHyperlinks : undefined
         } else {
           updateData.hyperlinks = undefined
-        }
-        // Only include architectureManager if it has a value
-        if (architectureManager.trim()) {
-          updateData.architectureManager = architectureManager.trim()
-        } else {
-          updateData.architectureManager = undefined
         }
         await db.items.update(item!.id!, updateData)
         // Verify the update worked by reloading the item
@@ -447,14 +443,6 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
             suggestions={peopleNames}
             className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700"
             placeholder="Name, another name"
-          />
-        </Field>
-        <Field label="Architecture Manager">
-          <AutocompleteInput
-            value={architectureManager}
-            onChange={setArchitectureManager}
-            suggestions={managerNames}
-            className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700"
           />
         </Field>
         <Field label="Tags (comma separated)">

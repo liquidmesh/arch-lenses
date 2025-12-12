@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useRef } from 'react'
 import { db, getAllLenses } from '../db'
 import { type ItemRecord, type RelationshipRecord, type LensKey, type LifecycleStatus, type RelationshipLifecycleStatus, LENSES } from '../types'
 import { ItemDialog } from './ItemDialog'
+import { loadTheme, type Theme } from '../utils/theme'
 
 // Deduplicate a list of items by id
 const dedupeItems = (items: ItemRecord[]): ItemRecord[] => {
@@ -14,7 +15,7 @@ const dedupeItems = (items: ItemRecord[]): ItemRecord[] => {
   return Array.from(map.values())
 }
 
-type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'manage-lenses' | 'tasks' | 'divest-replacement'
+type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'settings' | 'tasks' | 'divest-replacement'
 
 interface DivestReplacementViewProps {
   onNavigate?: (view: ViewType) => void
@@ -57,7 +58,23 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     const saved = localStorage.getItem('divest-replacement-column-view-mode')
     return (saved === 'both' || saved === 'current' || saved === 'target') ? saved : 'both'
   })
+  const [showUnrelatedSecondary, setShowUnrelatedSecondary] = useState<boolean>(() => {
+    const saved = localStorage.getItem('divest-replacement-show-unrelated-secondary')
+    return saved === 'true'
+  })
+  const [theme, setTheme] = useState<Theme>(loadTheme())
   const contentRef = useRef<HTMLDivElement>(null)
+
+  // Listen for theme changes
+  useEffect(() => {
+    function handleThemeChange() {
+      setTheme(loadTheme())
+    }
+    window.addEventListener('themeUpdated', handleThemeChange)
+    return () => {
+      window.removeEventListener('themeUpdated', handleThemeChange)
+    }
+  }, [])
 
   useEffect(() => {
     loadData()
@@ -113,6 +130,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
   useEffect(() => {
     localStorage.setItem('divest-replacement-column-view-mode', columnViewMode)
   }, [columnViewMode])
+
+  // Persist show unrelated secondary option to localStorage
+  useEffect(() => {
+    localStorage.setItem('divest-replacement-show-unrelated-secondary', String(showUnrelatedSecondary))
+  }, [showUnrelatedSecondary])
 
   async function loadData() {
     const [allLenses, allItems, allRels] = await Promise.all([
@@ -478,28 +500,107 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     })
   }, [primaryItems, secondaryLens, items, relationships, primaryLens, rollupLens, rollupMode])
 
-  // Get color for inner boxes: red for Divest, grey for No Status, blue for everything else
-  const getInnerBoxColor = (status?: LifecycleStatus): string => {
+  // Calculate secondary items that have no relationships to any primary items
+  const unrelatedSecondaryItems = useMemo(() => {
+    if (!primaryLens || !secondaryLens || primaryItems.length === 0) return []
+    
+    // Get all secondary items
+    const allSecondaryItems = items.filter(item => item.lens === secondaryLens)
+    
+    // Get all item IDs that are related to any primary item
+    const relatedSecondaryItemIds = new Set<number>()
+    
+    primaryItems.forEach(primaryItem => {
+      const relatedRels = relationships.filter(rel => {
+        return (
+          (rel.fromItemId === primaryItem.id && rel.toLens === secondaryLens) ||
+          (rel.toItemId === primaryItem.id && rel.fromLens === secondaryLens)
+        )
+      })
+      
+      relatedRels.forEach(rel => {
+        if (rel.fromItemId === primaryItem.id) {
+          relatedSecondaryItemIds.add(rel.toItemId)
+        } else {
+          relatedSecondaryItemIds.add(rel.fromItemId)
+        }
+      })
+    })
+    
+    // Return secondary items that are NOT in the related set
+    return allSecondaryItems.filter(item => item.id && !relatedSecondaryItemIds.has(item.id))
+  }, [primaryLens, secondaryLens, primaryItems, items, relationships])
+
+  // Get color for inner boxes using theme colors
+  // Color groups: (Error, Divest), (Success, Invest), (Info, Plan), (Primary, Default), (Warning, Emerging)
+  const getInnerBoxColor = (status?: LifecycleStatus): React.CSSProperties => {
     if (status === 'Divest') {
-      return 'bg-red-100 dark:bg-red-900 border-red-300 dark:border-red-700'
+      // Divest uses error color
+      return {
+        backgroundColor: theme.colors.error + '1a', // Add transparency
+        borderColor: theme.colors.error,
+      }
+    }
+    if (status === 'Invest') {
+      // Invest uses success color
+      return {
+        backgroundColor: theme.colors.success + '1a',
+        borderColor: theme.colors.success,
+      }
+    }
+    if (status === 'Plan') {
+      // Plan uses info color
+      return {
+        backgroundColor: theme.colors.info + '1a',
+        borderColor: theme.colors.info,
+      }
+    }
+    if (status === 'Emerging') {
+      // Emerging uses warning color
+      return {
+        backgroundColor: theme.colors.warning + '1a',
+        borderColor: theme.colors.warning,
+      }
     }
     if (!status) {
-      // No Status - grey
-      return 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700'
+      // No Status - use theme primary color (Default)
+      return {
+        backgroundColor: theme.colors.primary + '1a',
+        borderColor: theme.colors.primary,
+      }
     }
-    // Default color for all other statuses
-    return 'bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-700'
+    // Stable and any other statuses - use theme primary color (Default)
+    return {
+      backgroundColor: theme.colors.primary + '1a',
+      borderColor: theme.colors.primary,
+    }
   }
 
-  // Get outline color matching the border color for highlighted items
-  const getOutlineColor = (status?: LifecycleStatus): string => {
+  // Get outline color matching the border color for highlighted items using theme
+  // Color groups: (Error, Divest), (Success, Invest), (Info, Plan), (Primary, Default), (Warning, Emerging)
+  const getOutlineColor = (status?: LifecycleStatus): React.CSSProperties => {
     if (status === 'Divest') {
-      return 'outline-red-300 dark:outline-red-700'
+      return { outlineColor: theme.colors.error }
+    }
+    if (status === 'Invest') {
+      return { outlineColor: theme.colors.success }
+    }
+    if (status === 'Plan') {
+      return { outlineColor: theme.colors.info }
+    }
+    if (status === 'Emerging') {
+      return { outlineColor: theme.colors.warning }
     }
     if (!status) {
-      return 'outline-gray-300 dark:outline-gray-700'
+      return { outlineColor: theme.colors.primary }
     }
-    return 'outline-blue-300 dark:outline-blue-700'
+    // Stable and any other statuses
+    return { outlineColor: theme.colors.primary }
+  }
+  
+  // Get outline classes (keep outline classes, override color with inline style)
+  const getOutlineClasses = (): string => {
+    return 'outline outline-2 outline-offset-[-1px]'
   }
 
   const getLifecycleLabel = (status?: LifecycleStatus): string => {
@@ -536,35 +637,10 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     return false
   }
 
-  // Get the hovered item's lifecycle status for background color matching
-  const getHoveredItemStatus = (): LifecycleStatus | undefined => {
-    if (hoveredItemId !== null) {
-      const hoveredItem = items.find(item => item.id === hoveredItemId)
-      return hoveredItem?.lifecycleStatus
-    }
-    return undefined
-  }
-
-  // Get background color for highlighted items (use hovered item's color if related)
-  const getHighlightedItemColor = (item: ItemRecord): string => {
-    const isHighlighted = shouldHighlightItem(item)
-    if (!isHighlighted) {
-      return getInnerBoxColor(item.lifecycleStatus)
-    }
-    
-    // If this is the hovered item itself, use its own color
-    if (hoveredItemId === item.id) {
-      return getInnerBoxColor(item.lifecycleStatus)
-    }
-    
-    // If parent name is hovered, use gray background for related items
-    if (hoveredParentName !== null && item.parent === hoveredParentName) {
-      return getInnerBoxColor(undefined) // Gray for no status
-    }
-    
-    // If this is a related item, use the hovered item's color
-    const hoveredStatus = getHoveredItemStatus()
-    return getInnerBoxColor(hoveredStatus)
+  // Get background color for highlighted items (each item keeps its own color)
+  const getHighlightedItemColor = (item: ItemRecord): React.CSSProperties => {
+    // All items use their own background color, regardless of highlight state
+    return getInnerBoxColor(item.lifecycleStatus)
   }
 
   // Get opacity class for hovered and highlighted items
@@ -617,6 +693,26 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       })
       if (currentLine) lines.push(currentLine)
       return lines.length > 0 ? lines : [text]
+    }
+
+    // Helper functions to get SVG colors using theme
+    // Color groups: (Error, Divest), (Success, Invest), (Info, Plan), (Primary, Default), (Warning, Emerging)
+    function getSVGBoxFill(status?: LifecycleStatus): string {
+      if (status === 'Divest') return theme.colors.error + '1a' // Add transparency
+      if (status === 'Invest') return theme.colors.success + '1a'
+      if (status === 'Plan') return theme.colors.info + '1a'
+      if (status === 'Emerging') return theme.colors.warning + '1a'
+      if (!status) return theme.colors.primary + '1a'
+      return theme.colors.primary + '1a' // Stable and others
+    }
+
+    function getSVGBoxStroke(status?: LifecycleStatus): string {
+      if (status === 'Divest') return theme.colors.error
+      if (status === 'Invest') return theme.colors.success
+      if (status === 'Plan') return theme.colors.info
+      if (status === 'Emerging') return theme.colors.warning
+      if (!status) return theme.colors.primary
+      return theme.colors.primary // Stable and others
     }
 
     // Calculate dimensions
@@ -696,23 +792,23 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     svg.setAttribute('height', String(initialHeight))
     svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
 
-    // Add style element for fonts
+    // Add style element for fonts using theme
     const style = document.createElementNS('http://www.w3.org/2000/svg', 'style')
     style.textContent = `
-      .header { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: 600; fill: #334155; }
-      .primary-name { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: bold; fill: #1e293b; }
-      .primary-desc { font-family: system-ui, -apple-system, sans-serif; font-size: 10px; fill: #475569; }
-      .item-name { font-family: system-ui, -apple-system, sans-serif; font-size: 10px; fill: #1e293b; }
-      .item-minor { font-family: system-ui, -apple-system, sans-serif; font-size: 8px; fill: #475569; }
-      .parent-label { font-family: system-ui, -apple-system, sans-serif; font-size: 10px; font-weight: 500; fill: #64748b; }
+      .header { font-family: ${theme.fonts.heading}; font-size: 12px; font-weight: 600; fill: ${theme.colors.text}; }
+      .primary-name { font-family: ${theme.fonts.heading}; font-size: 12px; font-weight: bold; fill: ${theme.colors.text}; }
+      .primary-desc { font-family: ${theme.fonts.body}; font-size: 10px; fill: ${theme.colors.textSecondary}; }
+      .item-name { font-family: ${theme.fonts.body}; font-size: 10px; fill: ${theme.colors.text}; }
+      .item-minor { font-family: ${theme.fonts.body}; font-size: 8px; fill: ${theme.colors.textSecondary}; }
+      .parent-label { font-family: ${theme.fonts.body}; font-size: 10px; font-weight: 500; fill: ${theme.colors.textSecondary}; }
     `
     svg.appendChild(style)
 
-    // Background
+    // Background using theme
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
     bg.setAttribute('width', String(totalWidth))
     bg.setAttribute('height', String(initialHeight))
-    bg.setAttribute('fill', '#f8fafc')
+    bg.setAttribute('fill', theme.colors.background)
     svg.appendChild(bg)
 
     // Column headers
@@ -722,7 +818,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     headerLine.setAttribute('y1', String(headerY))
     headerLine.setAttribute('x2', String(totalWidth - padding))
     headerLine.setAttribute('y2', String(headerY))
-    headerLine.setAttribute('stroke', '#cbd5e1')
+    headerLine.setAttribute('stroke', theme.colors.border)
     headerLine.setAttribute('stroke-width', '2')
     svg.appendChild(headerLine)
 
@@ -812,8 +908,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       groupRect.setAttribute('y', String(currentY))
       groupRect.setAttribute('width', String(totalWidth - padding * 2))
       groupRect.setAttribute('height', String(groupHeight))
-      groupRect.setAttribute('fill', 'white')
-      groupRect.setAttribute('stroke', '#cbd5e1')
+      groupRect.setAttribute('fill', theme.colors.surface)
+      groupRect.setAttribute('stroke', theme.colors.border)
       groupRect.setAttribute('stroke-width', '1')
       groupRect.setAttribute('rx', '4')
       svg.appendChild(groupRect)
@@ -863,16 +959,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 box.setAttribute('width', String(boxWidth))
                 box.setAttribute('height', String(boxHeight))
                 box.setAttribute('rx', '4')
-                if (group.rollupItem.lifecycleStatus === 'Divest') {
-                  box.setAttribute('fill', '#fee2e2')
-                  box.setAttribute('stroke', '#ef4444')
-                } else if (!group.rollupItem.lifecycleStatus) {
-                  box.setAttribute('fill', '#f3f4f6')
-                  box.setAttribute('stroke', '#9ca3af')
-                } else {
-                  box.setAttribute('fill', '#dbeafe')
-                  box.setAttribute('stroke', '#3b82f6')
-                }
+                box.setAttribute('fill', getSVGBoxFill(group.rollupItem.lifecycleStatus))
+                box.setAttribute('stroke', getSVGBoxStroke(group.rollupItem.lifecycleStatus))
                 box.setAttribute('stroke-width', '1')
                 svg.appendChild(box)
 
@@ -928,16 +1016,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 box.setAttribute('width', String(boxWidth))
                 box.setAttribute('height', String(boxHeight))
                 box.setAttribute('rx', '4')
-                if (group.rollupItem.lifecycleStatus === 'Divest') {
-                  box.setAttribute('fill', '#fee2e2')
-                  box.setAttribute('stroke', '#ef4444')
-                } else if (!group.rollupItem.lifecycleStatus) {
-                  box.setAttribute('fill', '#f3f4f6')
-                  box.setAttribute('stroke', '#9ca3af')
-                } else {
-                  box.setAttribute('fill', '#dbeafe')
-                  box.setAttribute('stroke', '#3b82f6')
-                }
+                box.setAttribute('fill', getSVGBoxFill(group.rollupItem.lifecycleStatus))
+                box.setAttribute('stroke', getSVGBoxStroke(group.rollupItem.lifecycleStatus))
                 box.setAttribute('stroke-width', '1')
                 svg.appendChild(box)
 
@@ -1039,16 +1119,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               box.setAttribute('width', String(boxWidth))
               box.setAttribute('height', String(boxHeight))
               box.setAttribute('rx', '4')
-              if (item.lifecycleStatus === 'Divest') {
-                box.setAttribute('fill', '#fee2e2')
-                box.setAttribute('stroke', '#ef4444')
-              } else if (!item.lifecycleStatus) {
-                box.setAttribute('fill', '#f3f4f6')
-                box.setAttribute('stroke', '#9ca3af')
-              } else {
-                box.setAttribute('fill', '#dbeafe')
-                box.setAttribute('stroke', '#3b82f6')
-              }
+              box.setAttribute('fill', getSVGBoxFill(item.lifecycleStatus))
+              box.setAttribute('stroke', getSVGBoxStroke(item.lifecycleStatus))
               box.setAttribute('stroke-width', '1')
               svg.appendChild(box)
 
@@ -1106,16 +1178,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               box.setAttribute('width', String(boxWidth))
               box.setAttribute('height', String(boxHeight))
               box.setAttribute('rx', '4')
-              if (item.lifecycleStatus === 'Divest') {
-                box.setAttribute('fill', '#fee2e2')
-                box.setAttribute('stroke', '#ef4444')
-              } else if (!item.lifecycleStatus) {
-                box.setAttribute('fill', '#f3f4f6')
-                box.setAttribute('stroke', '#9ca3af')
-              } else {
-                box.setAttribute('fill', '#dbeafe')
-                box.setAttribute('stroke', '#3b82f6')
-              }
+              box.setAttribute('fill', getSVGBoxFill(item.lifecycleStatus))
+              box.setAttribute('stroke', getSVGBoxStroke(item.lifecycleStatus))
               box.setAttribute('stroke-width', '1')
               svg.appendChild(box)
 
@@ -1194,16 +1258,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               box.setAttribute('width', String(boxWidth))
               box.setAttribute('height', String(boxHeight))
               box.setAttribute('rx', '4')
-              if (item.lifecycleStatus === 'Divest') {
-                box.setAttribute('fill', '#fee2e2')
-                box.setAttribute('stroke', '#ef4444')
-              } else if (!item.lifecycleStatus) {
-                box.setAttribute('fill', '#f3f4f6')
-                box.setAttribute('stroke', '#9ca3af')
-              } else {
-                box.setAttribute('fill', '#dbeafe')
-                box.setAttribute('stroke', '#3b82f6')
-              }
+              box.setAttribute('fill', getSVGBoxFill(item.lifecycleStatus))
+              box.setAttribute('stroke', getSVGBoxStroke(item.lifecycleStatus))
               box.setAttribute('stroke-width', '1')
               svg.appendChild(box)
 
@@ -1237,16 +1293,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               box.setAttribute('width', String(boxWidth))
               box.setAttribute('height', String(boxHeight))
               box.setAttribute('rx', '4')
-              if (item.lifecycleStatus === 'Divest') {
-                box.setAttribute('fill', '#fee2e2')
-                box.setAttribute('stroke', '#ef4444')
-              } else if (!item.lifecycleStatus) {
-                box.setAttribute('fill', '#f3f4f6')
-                box.setAttribute('stroke', '#9ca3af')
-              } else {
-                box.setAttribute('fill', '#dbeafe')
-                box.setAttribute('stroke', '#3b82f6')
-              }
+              box.setAttribute('fill', getSVGBoxFill(item.lifecycleStatus))
+              box.setAttribute('stroke', getSVGBoxStroke(item.lifecycleStatus))
               box.setAttribute('stroke-width', '1')
               svg.appendChild(box)
 
@@ -1283,7 +1331,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           separator.setAttribute('y1', String(rowY))
           separator.setAttribute('x2', String(totalWidth - padding))
           separator.setAttribute('y2', String(rowY))
-          separator.setAttribute('stroke', '#e2e8f0')
+          separator.setAttribute('stroke', theme.colors.border)
           separator.setAttribute('stroke-width', '1')
           svg.appendChild(separator)
         }
@@ -1325,16 +1373,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           box.setAttribute('width', String(boxWidth))
           box.setAttribute('height', String(boxHeight))
           box.setAttribute('rx', '4')
-          if (item.lifecycleStatus === 'Divest') {
-            box.setAttribute('fill', '#fee2e2')
-            box.setAttribute('stroke', '#ef4444')
-          } else if (!item.lifecycleStatus) {
-            box.setAttribute('fill', '#f3f4f6')
-            box.setAttribute('stroke', '#9ca3af')
-          } else {
-            box.setAttribute('fill', '#dbeafe')
-            box.setAttribute('stroke', '#3b82f6')
-          }
+          box.setAttribute('fill', getSVGBoxFill(item.lifecycleStatus))
+          box.setAttribute('stroke', getSVGBoxStroke(item.lifecycleStatus))
           box.setAttribute('stroke-width', '1')
           svg.appendChild(box)
 
@@ -1393,16 +1433,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           box.setAttribute('width', String(boxWidth))
           box.setAttribute('height', String(boxHeight))
           box.setAttribute('rx', '4')
-          if (item.lifecycleStatus === 'Divest') {
-            box.setAttribute('fill', '#fee2e2')
-            box.setAttribute('stroke', '#ef4444')
-          } else if (!item.lifecycleStatus) {
-            box.setAttribute('fill', '#f3f4f6')
-            box.setAttribute('stroke', '#9ca3af')
-          } else {
-            box.setAttribute('fill', '#dbeafe')
-            box.setAttribute('stroke', '#3b82f6')
-          }
+          box.setAttribute('fill', getSVGBoxFill(item.lifecycleStatus))
+          box.setAttribute('stroke', getSVGBoxStroke(item.lifecycleStatus))
           box.setAttribute('stroke-width', '1')
           svg.appendChild(box)
 
@@ -1448,6 +1480,234 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
 
       currentY += groupHeight + rowGap
     })
+    
+    // Add unrelated secondary items section if enabled
+    if (showUnrelatedSecondary && unrelatedSecondaryItems.length > 0) {
+      // Add separator line
+      const separatorY = currentY + rowGap
+      const separator = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+      separator.setAttribute('x1', String(padding))
+      separator.setAttribute('y1', String(separatorY))
+      separator.setAttribute('x2', String(totalWidth - padding))
+      separator.setAttribute('y2', String(separatorY))
+      separator.setAttribute('stroke', theme.colors.border)
+      separator.setAttribute('stroke-width', '2')
+      svg.appendChild(separator)
+      
+      currentY = separatorY + rowGap * 2
+      
+      // Header for unrelated section
+      const unrelatedHeader = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+      unrelatedHeader.setAttribute('x', String(padding + 10))
+      unrelatedHeader.setAttribute('y', String(currentY))
+      unrelatedHeader.setAttribute('class', 'parent-label')
+      const secondaryLensLabel = LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens
+      unrelatedHeader.textContent = `${secondaryLensLabel} (Not Related)`
+      svg.appendChild(unrelatedHeader)
+      
+      currentY += 20
+      
+      // Column headers for unrelated section
+      if (hasAnyLifecycleStatus) {
+        if (showCurrent) {
+          const currentLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+          const currentLabelX = showCurrent && showTarget
+            ? padding + primaryColWidth + colGap + currentColWidth / 2
+            : padding + primaryColWidth + colGap + effectiveCurrentColWidth / 2
+          currentLabel.setAttribute('x', String(currentLabelX))
+          currentLabel.setAttribute('y', String(currentY))
+          currentLabel.setAttribute('class', 'header')
+          currentLabel.setAttribute('text-anchor', 'middle')
+          currentLabel.textContent = 'Current'
+          svg.appendChild(currentLabel)
+        }
+        if (showTarget) {
+          const targetLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+          const targetLabelX = showCurrent && showTarget
+            ? padding + primaryColWidth + colGap + currentColWidth + colGap + targetColWidth / 2
+            : padding + primaryColWidth + colGap + effectiveTargetColWidth / 2
+          targetLabel.setAttribute('x', String(targetLabelX))
+          targetLabel.setAttribute('y', String(currentY))
+          targetLabel.setAttribute('class', 'header')
+          targetLabel.setAttribute('text-anchor', 'middle')
+          targetLabel.textContent = 'Target'
+          svg.appendChild(targetLabel)
+        }
+      } else {
+        const secondaryLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+        const secondaryLabelX = padding + primaryColWidth + colGap + (totalWidth - padding - primaryColWidth - colGap) / 2
+        secondaryLabel.setAttribute('x', String(secondaryLabelX))
+        secondaryLabel.setAttribute('y', String(currentY))
+        secondaryLabel.setAttribute('class', 'header')
+        secondaryLabel.setAttribute('text-anchor', 'middle')
+        secondaryLabel.textContent = secondaryLensLabel
+        svg.appendChild(secondaryLabel)
+      }
+      
+      currentY += headerHeight
+      
+      // Draw unrelated items
+      if (hasAnyLifecycleStatus) {
+        // Current column items
+        if (showCurrent) {
+          const currentStartX = padding + primaryColWidth + colGap
+          const currentItems = unrelatedSecondaryItems.filter(item => {
+            return item.lifecycleStatus === 'Divest' || 
+                   item.lifecycleStatus === 'Stable' ||
+                   (!item.lifecycleStatus)
+          })
+          
+          currentItems.forEach((item: ItemRecord, itemIdx: number) => {
+            const col = itemIdx % boxesPerRow
+            const row = Math.floor(itemIdx / boxesPerRow)
+            const boxX = currentStartX + col * (boxWidth + boxGap)
+            const boxY = currentY + row * (boxHeight + boxGap)
+            
+            const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+            box.setAttribute('x', String(boxX))
+            box.setAttribute('y', String(boxY))
+            box.setAttribute('width', String(boxWidth))
+            box.setAttribute('height', String(boxHeight))
+            box.setAttribute('rx', '4')
+            box.setAttribute('fill', getSVGBoxFill(item.lifecycleStatus))
+            box.setAttribute('stroke', getSVGBoxStroke(item.lifecycleStatus))
+            box.setAttribute('stroke-width', '1')
+            svg.appendChild(box)
+            
+            const nameLines = wrapText(item.name, boxWidth - 8, 10)
+            nameLines.forEach((line, idx) => {
+              const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+              itemName.setAttribute('x', String(boxX + boxWidth / 2))
+              itemName.setAttribute('y', String(boxY + 12 + idx * 11))
+              itemName.setAttribute('class', 'item-name')
+              itemName.setAttribute('text-anchor', 'middle')
+              itemName.textContent = line
+              svg.appendChild(itemName)
+            })
+            
+            if (minorTextOption === 'lifecycle') {
+              const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+              minor.setAttribute('x', String(boxX + boxWidth / 2))
+              minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4))
+              minor.setAttribute('class', 'item-minor')
+              minor.setAttribute('text-anchor', 'middle')
+              minor.textContent = getLifecycleLabel(item.lifecycleStatus)
+              svg.appendChild(minor)
+            }
+          })
+        }
+        
+        // Target column items
+        if (showTarget) {
+          const targetStartX = showCurrent
+            ? padding + primaryColWidth + colGap + currentColWidth + colGap
+            : padding + primaryColWidth + colGap
+          const targetItems = unrelatedSecondaryItems.filter(item => {
+            return item.lifecycleStatus !== 'Divest'
+          })
+          
+          targetItems.forEach((item: ItemRecord, itemIdx: number) => {
+            const col = itemIdx % boxesPerRow
+            const row = Math.floor(itemIdx / boxesPerRow)
+            const boxX = targetStartX + col * (boxWidth + boxGap)
+            const boxY = currentY + row * (boxHeight + boxGap)
+            
+            const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+            box.setAttribute('x', String(boxX))
+            box.setAttribute('y', String(boxY))
+            box.setAttribute('width', String(boxWidth))
+            box.setAttribute('height', String(boxHeight))
+            box.setAttribute('rx', '4')
+            box.setAttribute('fill', getSVGBoxFill(item.lifecycleStatus))
+            box.setAttribute('stroke', getSVGBoxStroke(item.lifecycleStatus))
+            box.setAttribute('stroke-width', '1')
+            svg.appendChild(box)
+            
+            const nameLines = wrapText(item.name, boxWidth - 8, 10)
+            nameLines.forEach((line, idx) => {
+              const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+              itemName.setAttribute('x', String(boxX + boxWidth / 2))
+              itemName.setAttribute('y', String(boxY + 12 + idx * 11))
+              itemName.setAttribute('class', 'item-name')
+              itemName.setAttribute('text-anchor', 'middle')
+              itemName.textContent = line
+              svg.appendChild(itemName)
+            })
+            
+            if (minorTextOption === 'lifecycle') {
+              const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+              minor.setAttribute('x', String(boxX + boxWidth / 2))
+              minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4))
+              minor.setAttribute('class', 'item-minor')
+              minor.setAttribute('text-anchor', 'middle')
+              minor.textContent = getLifecycleLabel(item.lifecycleStatus)
+              svg.appendChild(minor)
+            }
+          })
+        }
+        
+        // Calculate height for unrelated items
+        const currentItems = showCurrent ? unrelatedSecondaryItems.filter(item => {
+          return item.lifecycleStatus === 'Divest' || 
+                 item.lifecycleStatus === 'Stable' ||
+                 (!item.lifecycleStatus)
+        }).length : 0
+        const targetItemsCount = showTarget ? unrelatedSecondaryItems.filter(item => {
+          return item.lifecycleStatus !== 'Divest'
+        }).length : 0
+        const maxItems = Math.max(currentItems, targetItemsCount)
+        const numRows = Math.ceil(maxItems / boxesPerRow)
+        const rowHeightForUnrelated = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight)
+        currentY += rowHeightForUnrelated
+      } else {
+        // No lifecycle status - show all unrelated items in single column
+        const itemsStartX = padding + primaryColWidth + colGap
+        unrelatedSecondaryItems.forEach((item: ItemRecord, itemIdx: number) => {
+          const col = itemIdx % boxesPerRow
+          const row = Math.floor(itemIdx / boxesPerRow)
+          const boxX = itemsStartX + col * (boxWidth + boxGap)
+          const boxY = currentY + row * (boxHeight + boxGap)
+          
+          const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+          box.setAttribute('x', String(boxX))
+          box.setAttribute('y', String(boxY))
+          box.setAttribute('width', String(boxWidth))
+          box.setAttribute('height', String(boxHeight))
+          box.setAttribute('rx', '4')
+          box.setAttribute('fill', getSVGBoxFill(item.lifecycleStatus))
+          box.setAttribute('stroke', getSVGBoxStroke(item.lifecycleStatus))
+          box.setAttribute('stroke-width', '1')
+          svg.appendChild(box)
+          
+          const nameLines = wrapText(item.name, boxWidth - 8, 10)
+          nameLines.forEach((line, idx) => {
+            const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+            itemName.setAttribute('x', String(boxX + boxWidth / 2))
+            itemName.setAttribute('y', String(boxY + 12 + idx * 11))
+            itemName.setAttribute('class', 'item-name')
+            itemName.setAttribute('text-anchor', 'middle')
+            itemName.textContent = line
+            svg.appendChild(itemName)
+          })
+          
+          if (minorTextOption === 'lifecycle') {
+            const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+            minor.setAttribute('x', String(boxX + boxWidth / 2))
+            minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4))
+            minor.setAttribute('class', 'item-minor')
+            minor.setAttribute('text-anchor', 'middle')
+            minor.textContent = getLifecycleLabel(item.lifecycleStatus)
+            svg.appendChild(minor)
+          }
+        })
+        
+        const numRows = Math.ceil(unrelatedSecondaryItems.length / boxesPerRow)
+        const rowHeightForUnrelated = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight)
+        currentY += rowHeightForUnrelated
+      }
+      
+      currentY += rowGap
+    }
     
     // Update SVG height to match actual content
     const finalHeight = currentY + padding
@@ -1547,154 +1807,169 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
-      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-4 p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-        <h1 className="text-xl font-semibold">Target View</h1>
-        <div className="flex items-center gap-4 ml-auto">
-          {primaryLens && secondaryLens && itemAnalysis.length > 0 && (
-            <button
-              onClick={handleExportSVG}
-              className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
-              title="Export as SVG"
-            >
-              Export SVG
-            </button>
-          )}
-          <label className="flex items-center gap-2">
-            <span className="text-xs">Primary Lens:</span>
-            <select
-              value={primaryLens}
-              onChange={e => setPrimaryLens(e.target.value as LensKey)}
-              className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-            >
-              <option value="">Select lens...</option>
-              {lenses.map(lens => (
-                <option key={lens.key} value={lens.key}>{lens.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-2">
-            <span className="text-xs">Secondary Lens:</span>
-            <select
-              value={secondaryLens}
-              onChange={e => setSecondaryLens(e.target.value as LensKey)}
-              className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-            >
-              <option value="">Select lens...</option>
-              {lenses.filter(l => l.key !== primaryLens).map(lens => (
-                <option key={lens.key} value={lens.key}>{lens.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-2">
-            <span className="text-xs">Roll-up Lens:</span>
-            <select
-              value={rollupLens}
-              onChange={e => setRollupLens(e.target.value as LensKey | '__parent__')}
-              className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-            >
-              <option value="">No roll-up</option>
-              <option value="__parent__">By Parent</option>
-              {lenses.filter(l => l.key !== primaryLens && l.key !== secondaryLens).map(lens => (
-                <option key={lens.key} value={lens.key}>{lens.label}</option>
-              ))}
-            </select>
-          </label>
-          {rollupLens && (
-            <label className="flex items-center gap-2">
-              <span className="text-xs">Roll-up Mode:</span>
-              <select
-                value={rollupMode}
-                onChange={e => setRollupMode(e.target.value as 'only-related' | 'show-secondary')}
-                className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-              >
-                <option value="only-related">Only show roll-ups</option>
-                <option value="show-secondary">Show secondary when not related</option>
-              </select>
-            </label>
-          )}
-          {primaryLens && secondaryLens && hasAnyLifecycleStatus && (
-            <label className="flex items-center gap-2">
-              <span className="text-xs">Show:</span>
-              <select
-                value={columnViewMode}
-                onChange={e => setColumnViewMode(e.target.value as 'both' | 'current' | 'target')}
-                className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-              >
-                <option value="both">Current and Target</option>
-                <option value="current">Current</option>
-                <option value="target">Target</option>
-              </select>
-            </label>
-          )}
-          <label className="flex items-center gap-2">
-            <span className="text-xs">Filter by Item:</span>
-            <div className="relative">
-              <input
-                type="text"
-                value={selectedFilterItem ? `${selectedFilterItem.name} (${LENSES.find(l => l.key === selectedFilterItem.lens)?.label || selectedFilterItem.lens})` : filterItemQuery}
-                onChange={e => {
-                  const value = e.target.value
-                  setFilterItemQuery(value)
-                  // Clear filter if user is typing (not showing selected item)
-                  if (selectedFilterItem) {
-                    const selectedText = `${selectedFilterItem.name} (${LENSES.find(l => l.key === selectedFilterItem.lens)?.label || selectedFilterItem.lens})`
-                    if (value !== selectedText) {
-                      setFilterItemId(null)
-                    }
-                  }
-                }}
-                placeholder="All (or search items...)"
-                className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 w-64"
-              />
-              {filterItemQuery.trim() && !selectedFilterItem && filterItemOptions.length > 0 && (
-                <div className="absolute z-10 mt-1 w-64 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded shadow-lg max-h-60 overflow-y-auto">
-                  {filterItemOptions.map(option => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        setFilterItemId(option.id)
-                        setFilterItemQuery('')
-                      }}
-                      className="w-full text-left px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm"
-                    >
-                      <div className="font-medium">{option.name}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{option.lensLabel}</div>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {selectedFilterItem && (
+      <div className="sticky top-0 z-10 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <div className="p-2 sm:p-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+            <h1 className="text-lg sm:text-xl font-semibold shrink-0">Target View</h1>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 flex-1 min-w-0">
+              {primaryLens && secondaryLens && itemAnalysis.length > 0 && (
                 <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    setFilterItemId(null)
-                    setFilterItemQuery('')
-                  }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 text-lg leading-none"
-                  title="Clear filter"
+                  onClick={handleExportSVG}
+                  className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
+                  title="Export as SVG"
                 >
-                  ×
+                  Export SVG
                 </button>
               )}
+              <label className="flex items-center gap-1 shrink-0">
+                <span className="text-xs whitespace-nowrap">Primary:</span>
+                <select
+                  value={primaryLens}
+                  onChange={e => setPrimaryLens(e.target.value as LensKey)}
+                  className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 min-w-0"
+                >
+                  <option value="">Select...</option>
+                  {lenses.map(lens => (
+                    <option key={lens.key} value={lens.key}>{lens.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-1 shrink-0">
+                <span className="text-xs whitespace-nowrap">Secondary:</span>
+                <select
+                  value={secondaryLens}
+                  onChange={e => setSecondaryLens(e.target.value as LensKey)}
+                  className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 min-w-0"
+                >
+                  <option value="">Select...</option>
+                  {lenses.filter(l => l.key !== primaryLens).map(lens => (
+                    <option key={lens.key} value={lens.key}>{lens.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-1 shrink-0">
+                <span className="text-xs whitespace-nowrap">Roll-up:</span>
+                <select
+                  value={rollupLens}
+                  onChange={e => setRollupLens(e.target.value as LensKey | '__parent__')}
+                  className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 min-w-0"
+                >
+                  <option value="">None</option>
+                  <option value="__parent__">Parent</option>
+                  {lenses.filter(l => l.key !== primaryLens && l.key !== secondaryLens).map(lens => (
+                    <option key={lens.key} value={lens.key}>{lens.label}</option>
+                  ))}
+                </select>
+              </label>
+              {rollupLens && (
+                <label className="flex items-center gap-1 shrink-0">
+                  <span className="text-xs whitespace-nowrap">Mode:</span>
+                  <select
+                    value={rollupMode}
+                    onChange={e => setRollupMode(e.target.value as 'only-related' | 'show-secondary')}
+                    className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 min-w-0"
+                  >
+                    <option value="only-related">Roll-ups only</option>
+                    <option value="show-secondary">Show secondary</option>
+                  </select>
+                </label>
+              )}
+              {primaryLens && secondaryLens && hasAnyLifecycleStatus && (
+                <label className="flex items-center gap-1 shrink-0">
+                  <span className="text-xs whitespace-nowrap">View:</span>
+                  <select
+                    value={columnViewMode}
+                    onChange={e => setColumnViewMode(e.target.value as 'both' | 'current' | 'target')}
+                    className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 min-w-0"
+                  >
+                    <option value="both">Both</option>
+                    <option value="current">Current</option>
+                    <option value="target">Target</option>
+                  </select>
+                </label>
+              )}
+              <label className="flex items-center gap-1 shrink-0 min-w-0 flex-1 sm:flex-initial">
+                <span className="text-xs whitespace-nowrap">Filter:</span>
+                <div className="relative flex-1 sm:flex-initial min-w-0">
+                  <input
+                    type="text"
+                    value={selectedFilterItem ? `${selectedFilterItem.name} (${LENSES.find(l => l.key === selectedFilterItem.lens)?.label || selectedFilterItem.lens})` : filterItemQuery}
+                    onChange={e => {
+                      const value = e.target.value
+                      setFilterItemQuery(value)
+                      // Clear filter if user is typing (not showing selected item)
+                      if (selectedFilterItem) {
+                        const selectedText = `${selectedFilterItem.name} (${LENSES.find(l => l.key === selectedFilterItem.lens)?.label || selectedFilterItem.lens})`
+                        if (value !== selectedText) {
+                          setFilterItemId(null)
+                        }
+                      }
+                    }}
+                    placeholder="All items..."
+                    className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 w-full sm:w-40 min-w-0"
+                  />
+                  {filterItemQuery.trim() && !selectedFilterItem && filterItemOptions.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full sm:w-64 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded shadow-lg max-h-60 overflow-y-auto">
+                      {filterItemOptions.map(option => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setFilterItemId(option.id)
+                            setFilterItemQuery('')
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm"
+                        >
+                          <div className="font-medium">{option.name}</div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400">{option.lensLabel}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {selectedFilterItem && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setFilterItemId(null)
+                        setFilterItemQuery('')
+                      }}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 text-lg leading-none"
+                      title="Clear filter"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              </label>
+              <label className="flex items-center gap-1 shrink-0">
+                <span className="text-xs whitespace-nowrap">Minor:</span>
+                <select
+                  value={minorTextOption}
+                  onChange={e => setMinorTextOption(e.target.value as 'none' | 'lifecycle' | 'description')}
+                  className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 min-w-0"
+                >
+                  <option value="none">None</option>
+                  <option value="lifecycle">Status</option>
+                  <option value="description">Desc</option>
+                </select>
+              </label>
+              {primaryLens && secondaryLens && unrelatedSecondaryItems.length > 0 && (
+                <label className="flex items-center gap-1 shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={showUnrelatedSecondary}
+                    onChange={e => setShowUnrelatedSecondary(e.target.checked)}
+                    className="rounded border-slate-300 dark:border-slate-700"
+                  />
+                  <span className="text-xs whitespace-nowrap">Unrelated ({unrelatedSecondaryItems.length})</span>
+                </label>
+              )}
             </div>
-          </label>
-          <label className="flex items-center gap-2">
-            <span className="text-xs">Minor Text:</span>
-            <select
-              value={minorTextOption}
-              onChange={e => setMinorTextOption(e.target.value as 'none' | 'lifecycle' | 'description')}
-              className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-            >
-              <option value="none">None</option>
-              <option value="lifecycle">Lifecycle Status</option>
-              <option value="description">Description</option>
-            </select>
-          </label>
+          </div>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-3">
@@ -1832,17 +2107,32 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           {hasCurrentItems ? (
                                             <div className={`grid ${getGridColsClass()} gap-1`}>
                                             <div
-                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                              className={`p-1 rounded border text-center ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
                                                 if (group.rollupItem.id) {
                                                   const isHovered = hoveredItemId === group.rollupItem.id
                                                   const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
                                                   const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
-                                                  return isHovered || isRelated ? `outline outline-2 ${getOutlineColor(group.rollupItem.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                                  return isHovered || isRelated ? getOutlineClasses() : ''
                                                 } else {
-                                                  // Parent name - highlight if this parent is hovered (use gray outline for parent names)
-                                                  return hoveredParentName === group.rollupItem.name ? 'outline outline-2 outline-gray-300 dark:outline-gray-700 outline-offset-[-1px]' : ''
+                                                  // Parent name - highlight if this parent is hovered
+                                                  return hoveredParentName === group.rollupItem.name ? getOutlineClasses() : ''
                                                 }
                                               })()}`}
+                                              style={{
+                                                ...getInnerBoxColor(group.rollupItem.lifecycleStatus),
+                                                ...(() => {
+                                                  if (group.rollupItem.id) {
+                                                    const isHovered = hoveredItemId === group.rollupItem.id
+                                                    const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                    const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                    return isHovered || isRelated ? getOutlineColor(group.rollupItem.lifecycleStatus) : {}
+                                                  } else {
+                                                    return hoveredParentName === group.rollupItem.name ? { outlineColor: theme.colors.secondary } : {}
+                                                  }
+                                                })(),
+                                                borderStyle: 'solid',
+                                                borderWidth: '1px',
+                                              }}
                                               onMouseEnter={() => {
                                                 if (group.rollupItem.id) {
                                                   setHoveredItemId(group.rollupItem.id)
@@ -1894,17 +2184,32 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         {hasCurrentItems ? (
                                           <div className={`grid ${getGridColsClass()} gap-1`}>
                                             <div
-                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                              className={`p-1 rounded border text-center ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
                                                 if (group.rollupItem.id) {
                                                   const isHovered = hoveredItemId === group.rollupItem.id
                                                   const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
                                                   const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
-                                                  return isHovered || isRelated ? 'border-2' : ''
+                                                  return isHovered || isRelated ? getOutlineClasses() : ''
                                                 } else {
                                                   // Parent name - highlight if this parent is hovered
-                                                  return hoveredParentName === group.rollupItem.name ? 'border-2' : ''
+                                                  return hoveredParentName === group.rollupItem.name ? getOutlineClasses() : ''
                                                 }
                                               })()}`}
+                                              style={{
+                                                ...getInnerBoxColor(group.rollupItem.lifecycleStatus),
+                                                ...(() => {
+                                                  if (group.rollupItem.id) {
+                                                    const isHovered = hoveredItemId === group.rollupItem.id
+                                                    const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                    const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                    return isHovered || isRelated ? getOutlineColor(group.rollupItem.lifecycleStatus) : {}
+                                                  } else {
+                                                    return hoveredParentName === group.rollupItem.name ? { outlineColor: theme.colors.secondary } : {}
+                                                  }
+                                                })(),
+                                                borderStyle: 'solid',
+                                                borderWidth: '1px',
+                                              }}
                                               onMouseEnter={() => {
                                                 if (group.rollupItem.id) {
                                                   setHoveredItemId(group.rollupItem.id)
@@ -1956,17 +2261,32 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         {hasCurrentItems ? (
                                           <div className={`grid ${getGridColsClass()} gap-1`}>
                                             <div
-                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                              className={`p-1 rounded border text-center ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
                                                 if (group.rollupItem.id) {
                                                   const isHovered = hoveredItemId === group.rollupItem.id
                                                   const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
                                                   const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
-                                                  return isHovered || isRelated ? `outline outline-2 ${getOutlineColor(group.rollupItem.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                                  return isHovered || isRelated ? getOutlineClasses() : ''
                                                 } else {
-                                                  // Parent name - highlight if this parent is hovered (use gray outline for parent names)
-                                                  return hoveredParentName === group.rollupItem.name ? 'outline outline-2 outline-gray-300 dark:outline-gray-700 outline-offset-[-1px]' : ''
+                                                  // Parent name - highlight if this parent is hovered
+                                                  return hoveredParentName === group.rollupItem.name ? getOutlineClasses() : ''
                                                 }
                                               })()}`}
+                                              style={{
+                                                ...getInnerBoxColor(group.rollupItem.lifecycleStatus),
+                                                ...(() => {
+                                                  if (group.rollupItem.id) {
+                                                    const isHovered = hoveredItemId === group.rollupItem.id
+                                                    const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                    const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                    return isHovered || isRelated ? getOutlineColor(group.rollupItem.lifecycleStatus) : {}
+                                                  } else {
+                                                    return hoveredParentName === group.rollupItem.name ? { outlineColor: theme.colors.secondary } : {}
+                                                  }
+                                                })(),
+                                                borderStyle: 'solid',
+                                                borderWidth: '1px',
+                                              }}
                                               onMouseEnter={() => {
                                                 if (group.rollupItem.id) {
                                                   setHoveredItemId(group.rollupItem.id)
@@ -2035,8 +2355,15 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         const secondaryLensLabel = LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens
                                         return count > 0 ? (
                                           <div className={`grid ${getGridColsClass()} gap-1`}>
-                                            <div className="p-1 rounded border text-center bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700">
-                                              <div className="text-xs text-slate-600 dark:text-slate-400">
+                                            <div 
+                                              className="p-1 rounded border text-center"
+                                              style={{
+                                                backgroundColor: theme.colors.secondary + '1a',
+                                                borderColor: theme.colors.secondary,
+                                                color: theme.colors.textSecondary,
+                                              }}
+                                            >
+                                              <div className="text-xs">
                                                 +{count} other {secondaryLensLabel}
                                               </div>
                                             </div>
@@ -2053,11 +2380,17 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         <div className={`grid ${getGridColsClass()} gap-1`}>
                                           {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).map((item: ItemRecord) => {
                                             const isHighlighted = shouldHighlightItem(item)
-                                            const highlightClass = isHighlighted ? `outline outline-2 ${getOutlineColor(item.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                            const highlightClass = isHighlighted ? getOutlineClasses() : ''
                                             return (
                                             <div
                                               key={item.id}
-                                              className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                              className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                              style={{
+                                                ...getHighlightedItemColor(item),
+                                                ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                                borderStyle: 'solid',
+                                                borderWidth: '1px',
+                                              }}
                                               onMouseEnter={() => {
                                                 if (item.id) setHoveredItemId(item.id)
                                                 setHoveredParentName(null)
@@ -2111,13 +2444,25 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           {hasTargetItemsInGroup ? (
                                             <div className={`grid ${getGridColsClass()} gap-1`}>
                                               <div
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                                className={`p-1 rounded border text-center ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
                                                   if (!group.rollupItem.id) return ''
                                                   const isHovered = hoveredItemId === group.rollupItem.id
                                                   const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
                                                   const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
-                                                  return isHovered || isRelated ? 'border-2' : ''
+                                                  return isHovered || isRelated ? getOutlineClasses() : ''
                                                 })()}`}
+                                                style={{
+                                                  ...getInnerBoxColor(group.rollupItem.lifecycleStatus),
+                                                  ...(() => {
+                                                    if (!group.rollupItem.id) return {}
+                                                    const isHovered = hoveredItemId === group.rollupItem.id
+                                                    const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                    const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                    return isHovered || isRelated ? getOutlineColor(group.rollupItem.lifecycleStatus) : {}
+                                                  })(),
+                                                  borderStyle: 'solid',
+                                                  borderWidth: '1px',
+                                                }}
                                                 onMouseEnter={() => group.rollupItem.id && setHoveredItemId(group.rollupItem.id)}
                                                 onMouseLeave={() => setHoveredItemId(null)}
                                                 onClick={() => {
@@ -2168,13 +2513,25 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           {hasTargetItemsInGroup ? (
                                             <div className={`grid ${getGridColsClass()} gap-1`}>
                                               <div
-                                                className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                                className={`p-1 rounded border text-center ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
                                                   if (!group.rollupItem.id) return ''
                                                   const isHovered = hoveredItemId === group.rollupItem.id
                                                   const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
                                                   const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
-                                                  return isHovered || isRelated ? 'border-2' : ''
+                                                  return isHovered || isRelated ? getOutlineClasses() : ''
                                                 })()}`}
+                                                style={{
+                                                  ...getInnerBoxColor(group.rollupItem.lifecycleStatus),
+                                                  ...(() => {
+                                                    if (!group.rollupItem.id) return {}
+                                                    const isHovered = hoveredItemId === group.rollupItem.id
+                                                    const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                    const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                    return isHovered || isRelated ? getOutlineColor(group.rollupItem.lifecycleStatus) : {}
+                                                  })(),
+                                                  borderStyle: 'solid',
+                                                  borderWidth: '1px',
+                                                }}
                                                 onMouseEnter={() => group.rollupItem.id && setHoveredItemId(group.rollupItem.id)}
                                                 onMouseLeave={() => setHoveredItemId(null)}
                                                 onClick={() => {
@@ -2224,17 +2581,32 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         {hasTargetItemsInGroup ? (
                                           <div className={`grid ${getGridColsClass()} gap-1`}>
                                             <div
-                                              className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                              className={`p-1 rounded border text-center ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
                                                 if (group.rollupItem.id) {
                                                   const isHovered = hoveredItemId === group.rollupItem.id
                                                   const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
                                                   const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
-                                                  return isHovered || isRelated ? `outline outline-2 ${getOutlineColor(group.rollupItem.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                                  return isHovered || isRelated ? getOutlineClasses() : ''
                                                 } else {
-                                                  // Parent name - highlight if this parent is hovered (use gray outline for parent names)
-                                                  return hoveredParentName === group.rollupItem.name ? 'outline outline-2 outline-gray-300 dark:outline-gray-700 outline-offset-[-1px]' : ''
+                                                  // Parent name - highlight if this parent is hovered
+                                                  return hoveredParentName === group.rollupItem.name ? getOutlineClasses() : ''
                                                 }
                                               })()}`}
+                                              style={{
+                                                ...getInnerBoxColor(group.rollupItem.lifecycleStatus),
+                                                ...(() => {
+                                                  if (group.rollupItem.id) {
+                                                    const isHovered = hoveredItemId === group.rollupItem.id
+                                                    const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                    const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                    return isHovered || isRelated ? getOutlineColor(group.rollupItem.lifecycleStatus) : {}
+                                                  } else {
+                                                    return hoveredParentName === group.rollupItem.name ? { outlineColor: theme.colors.secondary } : {}
+                                                  }
+                                                })(),
+                                                borderStyle: 'solid',
+                                                borderWidth: '1px',
+                                              }}
                                               onMouseEnter={() => {
                                                 if (group.rollupItem.id) {
                                                   setHoveredItemId(group.rollupItem.id)
@@ -2316,8 +2688,15 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         const secondaryLensLabel = LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens
                                         return count > 0 ? (
                                           <div className={`grid ${getGridColsClass()} gap-1`}>
-                                            <div className="p-1 rounded border text-center bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700">
-                                              <div className="text-xs text-slate-600 dark:text-slate-400">
+                                            <div 
+                                              className="p-1 rounded border text-center"
+                                              style={{
+                                                backgroundColor: theme.colors.secondary + '1a',
+                                                borderColor: theme.colors.secondary,
+                                                color: theme.colors.textSecondary,
+                                              }}
+                                            >
+                                              <div className="text-xs">
                                                 +{count} other {secondaryLensLabel}
                                               </div>
                                             </div>
@@ -2334,11 +2713,17 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         <div className={`grid ${getGridColsClass()} gap-1`}>
                                           {ungroupedSecondaryItems.filter((item: ItemRecord) => targetItems.includes(item)).map((item: ItemRecord) => {
                                             const isHighlighted = shouldHighlightItem(item)
-                                            const highlightClass = isHighlighted ? `outline outline-2 ${getOutlineColor(item.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                            const highlightClass = isHighlighted ? getOutlineClasses() : ''
                                             return (
                                             <div
                                               key={item.id}
-                                              className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                              className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                              style={{
+                                                ...getHighlightedItemColor(item),
+                                                ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                                borderStyle: 'solid',
+                                                borderWidth: '1px',
+                                              }}
                                               onMouseEnter={() => {
                                                 if (item.id) setHoveredItemId(item.id)
                                                 setHoveredParentName(null)
@@ -2397,13 +2782,25 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                             {(group.divestItems || []).length > 0 ? (
                                               <div className={`grid ${getGridColsClass()} gap-1`}>
                                                 <div
-                                                  className={`p-1 rounded border text-center ${getInnerBoxColor(group.rollupItem.lifecycleStatus)} ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
+                                                  className={`p-1 rounded border text-center ${group.rollupItem.id ? 'cursor-pointer' : ''} ${getRollupItemOpacityClass(group.rollupItem)} ${(() => {
                                                     if (!group.rollupItem.id) return ''
                                                     const isHovered = hoveredItemId === group.rollupItem.id
                                                     const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
                                                     const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
-                                                    return isHovered || isRelated ? 'border-2' : ''
+                                                    return isHovered || isRelated ? getOutlineClasses() : ''
                                                   })()}`}
+                                                  style={{
+                                                    ...getInnerBoxColor(group.rollupItem.lifecycleStatus),
+                                                    ...(() => {
+                                                      if (!group.rollupItem.id) return {}
+                                                      const isHovered = hoveredItemId === group.rollupItem.id
+                                                      const relatedIds = hoveredItemId ? getRelatedItemIds(hoveredItemId) : new Set<number>()
+                                                      const isRelated = hoveredItemId !== null && relatedIds.has(group.rollupItem.id)
+                                                      return isHovered || isRelated ? getOutlineColor(group.rollupItem.lifecycleStatus) : {}
+                                                    })(),
+                                                    borderStyle: 'solid',
+                                                    borderWidth: '1px',
+                                                  }}
                                                   onMouseEnter={() => group.rollupItem.id && setHoveredItemId(group.rollupItem.id)}
                                                   onMouseLeave={() => setHoveredItemId(null)}
                                                   onClick={() => {
@@ -2440,7 +2837,12 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                 return (
                                                 <div
                                                   key={item.id}
-                                                  className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                                  className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                              style={{
+                                                ...getHighlightedItemColor(item),
+                                                borderStyle: 'solid',
+                                                borderWidth: '1px',
+                                              }}
                                                   onMouseEnter={() => {
                                                     if (item.id) setHoveredItemId(item.id)
                                                     setHoveredParentName(null)
@@ -2522,11 +2924,15 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       <div className={`grid ${getGridColsClass()} gap-1`}>
                                         {divestItems.map((item: ItemRecord) => {
                                           const isHighlighted = shouldHighlightItem(item)
-                                          const highlightClass = isHighlighted ? `outline outline-2 ${getOutlineColor(item.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                          const highlightClass = isHighlighted ? getOutlineClasses() : ''
                                           return (
                                           <div
                                             key={item.id}
-                                            className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                            className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                            style={{
+                                              ...getHighlightedItemColor(item),
+                                              ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                            }}
                                             onMouseEnter={() => {
                                               if (item.id) setHoveredItemId(item.id)
                                               setHoveredParentName(null)
@@ -2572,11 +2978,15 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       <div className={`grid ${getGridColsClass()} gap-1`}>
                                         {targetItems.map((item: ItemRecord) => {
                                           const isHighlighted = shouldHighlightItem(item)
-                                          const highlightClass = isHighlighted ? `outline outline-2 ${getOutlineColor(item.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                          const highlightClass = isHighlighted ? getOutlineClasses() : ''
                                           return (
                                           <div
                                             key={item.id}
-                                            className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                            className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                            style={{
+                                              ...getHighlightedItemColor(item),
+                                              ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                            }}
                                             onMouseEnter={() => {
                                               if (item.id) setHoveredItemId(item.id)
                                               setHoveredParentName(null)
@@ -2627,11 +3037,17 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                     <div className={`grid ${getGridColsClass()} gap-1`}>
                                       {allItems.map((item: ItemRecord) => {
                                         const isHighlighted = shouldHighlightItem(item)
-                                        const highlightClass = isHighlighted ? `outline outline-2 ${getOutlineColor(item.lifecycleStatus)} outline-offset-[-1px]` : ''
+                                        const highlightClass = isHighlighted ? getOutlineClasses() : ''
                                         return (
                                         <div
                                           key={item.id}
-                                          className={`p-1 rounded border text-center ${getHighlightedItemColor(item)} cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                          className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                          style={{
+                                            ...getHighlightedItemColor(item),
+                                            ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                            borderStyle: 'solid',
+                                            borderWidth: '1px',
+                                          }}
                                           onMouseEnter={() => {
                                             if (item.id) setHoveredItemId(item.id)
                                             setHoveredParentName(null)
@@ -2677,6 +3093,220 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                   )
                 })}
               </div>
+              
+              {/* Unrelated Secondary Items Section */}
+              {showUnrelatedSecondary && unrelatedSecondaryItems.length > 0 && (
+                <div className="mt-6 pt-6 border-t-2 border-slate-300 dark:border-slate-700">
+                  <div className={`grid ${(() => {
+                    if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
+                    if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
+                    return 'grid-cols-[200px_1fr]'
+                  })()} gap-3 mb-2 pb-2 border-b-2 border-slate-300 dark:border-slate-700`}>
+                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                      {LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens} (Not Related)
+                    </div>
+                    {hasAnyLifecycleStatus ? (
+                      <>
+                        {columnViewMode === 'both' && (
+                          <>
+                            <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                              Current
+                            </div>
+                            <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                              Target
+                            </div>
+                          </>
+                        )}
+                        {columnViewMode === 'current' && (
+                          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                            Current
+                          </div>
+                        )}
+                        {columnViewMode === 'target' && (
+                          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                            Target
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                        {LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens}
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="bg-white dark:bg-slate-800 rounded border border-slate-300 dark:border-slate-700 overflow-hidden p-2">
+                    <div className={`grid ${(() => {
+                      if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
+                      if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
+                      return 'grid-cols-[200px_1fr]'
+                    })()} gap-3`}>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 italic">
+                        (No primary item)
+                      </div>
+                      {hasAnyLifecycleStatus ? (
+                        <>
+                          {(columnViewMode === 'both' || columnViewMode === 'current') && (
+                            <div className={columnViewMode === 'both' ? 'mr-6' : ''}>
+                              <div className={`grid ${getGridColsClass()} gap-1`}>
+                                {unrelatedSecondaryItems
+                                  .filter(item => {
+                                    // Show in Current if item has Divest status or relationship lifecycle is Divest
+                                    return item.lifecycleStatus === 'Divest' || 
+                                           item.lifecycleStatus === 'Stable' ||
+                                           (!item.lifecycleStatus)
+                                  })
+                                  .map((item: ItemRecord) => {
+                                    const isHighlighted = shouldHighlightItem(item)
+                                    const highlightClass = isHighlighted ? getOutlineClasses() : ''
+                                    return (
+                                      <div
+                                        key={item.id}
+                                        className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                        style={{
+                                          ...getHighlightedItemColor(item),
+                                          ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                          borderStyle: 'solid',
+                                          borderWidth: '1px',
+                                        }}
+                                        onMouseEnter={() => {
+                                          if (item.id) setHoveredItemId(item.id)
+                                          setHoveredParentName(null)
+                                        }}
+                                        onMouseLeave={() => {
+                                          setHoveredItemId(null)
+                                          setHoveredParentName(null)
+                                        }}
+                                        onClick={() => {
+                                          setEditItem(item)
+                                          setEditDialogOpen(true)
+                                        }}
+                                      >
+                                        <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                          {item.name}
+                                        </div>
+                                        {minorTextOption === 'description' && item.description && (
+                                          <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                            {item.description}
+                                          </div>
+                                        )}
+                                        {minorTextOption === 'lifecycle' && (
+                                          <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                            {getLifecycleLabel(item.lifecycleStatus)}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  })}
+                              </div>
+                            </div>
+                          )}
+                          {(columnViewMode === 'both' || columnViewMode === 'target') && (
+                            <div className={columnViewMode === 'both' ? 'ml-6' : ''}>
+                              <div className={`grid ${getGridColsClass()} gap-1`}>
+                                {unrelatedSecondaryItems
+                                  .filter(item => {
+                                    // Show in Target if item doesn't have Divest status
+                                    return item.lifecycleStatus !== 'Divest'
+                                  })
+                                  .map((item: ItemRecord) => {
+                                    const isHighlighted = shouldHighlightItem(item)
+                                    const highlightClass = isHighlighted ? getOutlineClasses() : ''
+                                    return (
+                                      <div
+                                        key={item.id}
+                                        className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                        style={{
+                                          ...getHighlightedItemColor(item),
+                                          ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                          borderStyle: 'solid',
+                                          borderWidth: '1px',
+                                        }}
+                                        onMouseEnter={() => {
+                                          if (item.id) setHoveredItemId(item.id)
+                                          setHoveredParentName(null)
+                                        }}
+                                        onMouseLeave={() => {
+                                          setHoveredItemId(null)
+                                          setHoveredParentName(null)
+                                        }}
+                                        onClick={() => {
+                                          setEditItem(item)
+                                          setEditDialogOpen(true)
+                                        }}
+                                      >
+                                        <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                          {item.name}
+                                        </div>
+                                        {minorTextOption === 'description' && item.description && (
+                                          <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                            {item.description}
+                                          </div>
+                                        )}
+                                        {minorTextOption === 'lifecycle' && (
+                                          <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                            {getLifecycleLabel(item.lifecycleStatus)}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  })}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div>
+                          <div className={`grid ${getGridColsClass()} gap-1`}>
+                            {unrelatedSecondaryItems.map((item: ItemRecord) => {
+                              const isHighlighted = shouldHighlightItem(item)
+                              const highlightClass = isHighlighted ? getOutlineClasses() : ''
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                  style={{
+                                    ...getHighlightedItemColor(item),
+                                    ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                    borderStyle: 'solid',
+                                    borderWidth: '1px',
+                                  }}
+                                  onMouseEnter={() => {
+                                    if (item.id) setHoveredItemId(item.id)
+                                    setHoveredParentName(null)
+                                  }}
+                                  onMouseLeave={() => {
+                                    setHoveredItemId(null)
+                                    setHoveredParentName(null)
+                                  }}
+                                  onClick={() => {
+                                    setEditItem(item)
+                                    setEditDialogOpen(true)
+                                  }}
+                                >
+                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                    {item.name}
+                                  </div>
+                                  {minorTextOption === 'description' && item.description && (
+                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                      {item.description}
+                                    </div>
+                                  )}
+                                  {minorTextOption === 'lifecycle' && (
+                                    <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                      {getLifecycleLabel(item.lifecycleStatus)}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-12 text-slate-500 dark:text-slate-400">

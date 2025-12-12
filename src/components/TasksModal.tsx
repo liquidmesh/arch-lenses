@@ -3,7 +3,7 @@ import { db, getAllItemNames } from '../db'
 import { type Task, type MeetingNote, LENSES } from '../types'
 import { TaskDialog } from './TaskDialog'
 
-type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'manage-lenses' | 'tasks'
+type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes' | 'settings' | 'tasks'
 
 interface TasksModalProps {
   onEditPerson?: (personName: string) => void

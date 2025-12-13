@@ -1777,10 +1777,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     })
   }, [groupedItemAnalysis])
 
-  // Check if any items have a lifecycleStatus
+  // Check if any items have a lifecycleStatus OR if any relationships have a lifecycleStatus that is not "Existing"
   const hasAnyLifecycleStatus = useMemo(() => {
     if (!itemAnalysis.length) return false
     return itemAnalysis.some(analysis => {
+      // Check if any items have a lifecycleStatus
       const allItems = [
         ...(analysis.divestItems || []),
         ...(analysis.targetItems || []),
@@ -1791,17 +1792,30 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
         ]) || []),
         ...(analysis.ungroupedSecondaryItems || [])
       ]
-      return allItems.some(item => item && item.lifecycleStatus)
+      const hasItemLifecycleStatus = allItems.some(item => item && item.lifecycleStatus)
+      
+      // Check if any relationships have a lifecycleStatus that is not "Existing"
+      const hasNonExistingRelationshipStatus = analysis.itemRelLifecycleMap && 
+        Array.from(analysis.itemRelLifecycleMap.values()).some(
+          (relStatus: RelationshipLifecycleStatus | undefined) => 
+            relStatus !== undefined && relStatus !== 'Existing'
+        )
+      
+      return hasItemLifecycleStatus || hasNonExistingRelationshipStatus
     })
   }, [itemAnalysis])
 
   // Get grid columns class based on view mode
   const getGridColsClass = (): string => {
     if (hasAnyLifecycleStatus && columnViewMode !== 'both') {
-      // Single column mode - use more columns to fill the width
+      // Single column mode (Current or Target only) - use more columns to fill the width
       return 'grid-cols-5'
     }
-    // Two column mode or no lifecycle status - use 3 columns
+    if (!hasAnyLifecycleStatus) {
+      // Single column view (no lifecycle status) - use same as Current view
+      return 'grid-cols-5'
+    }
+    // Two column mode (both Current and Target) - use 3 columns
     return 'grid-cols-3'
   }
 

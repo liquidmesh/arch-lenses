@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db } from '../db'
-import { hasGap, type ItemRecord, type LensKey, type RelationshipRecord } from '../types'
-import { LENSES } from '../types'
+import { hasGap, type ItemRecord, type LensKey } from '../types'
 import clsx from 'clsx'
 import { ItemDialog } from './ItemDialog'
 
@@ -15,31 +14,10 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
   const [items, setItems] = useState<ItemRecord[]>([])
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogItem, setDialogItem] = useState<ItemRecord | null>(null)
-  const [relationships, setRelationships] = useState<RelationshipRecord[]>([])
-  const [relatedItemsMap, setRelatedItemsMap] = useState<Map<number, ItemRecord>>(new Map())
 
   async function load() {
     const rows = await db.items.where('lens').equals(lens).sortBy('name')
     setItems(rows)
-    
-    // Load all relationships for items in this lens
-    const allRels = await db.relationships.toArray()
-    const itemIds = new Set(rows.map(r => r.id).filter((id): id is number => !!id))
-    const relevantRels = allRels.filter(r => itemIds.has(r.fromItemId) || itemIds.has(r.toItemId))
-    setRelationships(relevantRels)
-    
-    // Load related items
-    const relatedIds = new Set<number>()
-    relevantRels.forEach(r => {
-      if (itemIds.has(r.fromItemId)) relatedIds.add(r.toItemId)
-      if (itemIds.has(r.toItemId)) relatedIds.add(r.fromItemId)
-    })
-    const relatedItems = await db.items.bulkGet(Array.from(relatedIds))
-    const map = new Map<number, ItemRecord>()
-    relatedItems.forEach(item => {
-      if (item) map.set(item.id!, item)
-    })
-    setRelatedItemsMap(map)
   }
 
   useEffect(() => {

@@ -110,7 +110,6 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
               <th className="py-2 pr-2">Primary SME</th>
               <th className="py-2 pr-2">Secondary SMEs</th>
               <th className="py-2 pr-2">Tags</th>
-              <th className="py-2 pr-2">Related Items</th>
               <th className="py-2 pr-2">Skills Gaps</th>
               <th className="py-2 pr-2 w-28">Actions</th>
             </tr>
@@ -138,38 +137,6 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
                   {item.tags.length === 0 ? <span className="text-slate-400">(none)</span> : item.tags.join(', ')}
                 </td>
                 <td className="py-2 pr-2">
-                  {(() => {
-                    const itemRels = relationships.filter(r => r.fromItemId === item.id || r.toItemId === item.id)
-                    if (itemRels.length === 0) return <span className="text-slate-400">(none)</span>
-                    
-                    // Deduplicate by related item ID to avoid showing the same relationship twice
-                    const seenRelatedIds = new Set<number>()
-                    const uniqueRels = itemRels.filter(r => {
-                      const relatedId = r.fromItemId === item.id ? r.toItemId : r.fromItemId
-                      if (seenRelatedIds.has(relatedId)) {
-                        return false
-                      }
-                      seenRelatedIds.add(relatedId)
-                      return true
-                    })
-                    
-                    return (
-                      <div className="flex flex-wrap gap-1">
-                        {uniqueRels.map(r => {
-                          const relatedId = r.fromItemId === item.id ? r.toItemId : r.fromItemId
-                          const relatedItem = relatedItemsMap.get(relatedId)
-                          const relatedLens = LENSES.find(l => l.key === (r.fromItemId === item.id ? r.toLens : r.fromLens))
-                          return (
-                            <span key={r.id} className="px-1.5 py-0.5 rounded text-xs bg-slate-100 dark:bg-slate-800">
-                              {relatedLens?.label || 'Unknown'}: {relatedItem?.name || `#${relatedId}`}
-                            </span>
-                          )
-                        })}
-                      </div>
-                    )
-                  })()}
-                </td>
-                <td className="py-2 pr-2">
                   {item.skillsGaps || <span className="text-slate-400">(none)</span>}
                 </td>
                 <td className="py-2 pr-2 flex gap-2">
@@ -180,7 +147,7 @@ export function LensPanel({ lens, title, query }: LensPanelProps) {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={12} className="text-center text-slate-500 py-6">No items</td>
+                <td colSpan={11} className="text-center text-slate-500 py-6">No items</td>
               </tr>
             )}
           </tbody>

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { db, getAllLenses } from '../db'
-import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type LensDefinition, type Task, type TeamMember } from '../types'
+import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type LensDefinition, type Task, type TeamMember, type MeetingNote } from '../types'
 import { ItemDialog } from './ItemDialog'
 import { getLensOrderSync } from '../utils/lensOrder'
+import { loadTheme, type Theme } from '../utils/theme'
 
 type ViewType = 'main' | 'diagram' | 'architects' | 'stakeholders' | 'manage-team' | 'meeting-notes'
 
@@ -56,8 +57,112 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   const [lenses, setLenses] = useState<LensDefinition[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
+  const [theme, setTheme] = useState<Theme>(loadTheme())
+  const [showDetailsBox, setShowDetailsBox] = useState(true)
+  const [relatedNotes, setRelatedNotes] = useState<MeetingNote[]>([])
+  const [relatedTasks, setRelatedTasks] = useState<Task[]>([])
+  const [relatedItemsMap, setRelatedItemsMap] = useState<Map<number, ItemRecord>>(new Map())
   
   const svgRef = useRef<SVGSVGElement>(null)
+  
+  // Helper function to get lens label
+  function lensLabel(lens: string): string {
+    return lenses.find(l => l.key === lens)?.label || lens
+  }
+  
+  // Get selected item for details box
+  const selectedItem = useMemo(() => {
+    if (!selectedItemId) return null
+    return items.find(i => i.id === selectedItemId) || null
+  }, [items, selectedItemId])
+  
+  // Function to toggle task completion
+  async function handleToggleTaskComplete(task: Task) {
+    if (!task.id) return
+    const now = Date.now()
+    await db.tasks.update(task.id, {
+      completedAt: task.completedAt ? undefined : now,
+      updatedAt: now,
+    })
+    // Reload related tasks
+    if (selectedItemId) {
+      const allTasks = await db.tasks.toArray()
+      const relevantTasks = allTasks.filter(t => t.itemReferences && t.itemReferences.filter((id): id is number => id !== undefined).includes(selectedItemId))
+      const sortedTasks = relevantTasks.sort((a, b) => {
+        const aCompleted = !!a.completedAt
+        const bCompleted = !!b.completedAt
+        if (aCompleted !== bCompleted) {
+          return aCompleted ? 1 : -1
+        }
+        return (b.createdAt || 0) - (a.createdAt || 0)
+      })
+      setRelatedTasks(sortedTasks)
+    }
+  }
+  
+  // Load related notes, tasks, and items when selectedItemId changes
+  useEffect(() => {
+    if (!selectedItemId) {
+      setRelatedNotes([])
+      setRelatedTasks([])
+      setRelatedItemsMap(new Map())
+      return
+    }
+    
+    async function loadRelatedData() {
+      if (!selectedItemId) return
+      
+      // Load related notes
+      const allTasks = await db.tasks.toArray()
+      const relevantTasks = allTasks.filter(t => t.itemReferences && t.itemReferences.filter((id): id is number => id !== undefined).includes(selectedItemId))
+      const noteIdsFromTasks = Array.from(new Set(relevantTasks.map(t => t.meetingNoteId).filter((id): id is number => id !== undefined)))
+      
+      const allNotes = await db.meetingNotes.toArray()
+      const notesWithRelatedItem = allNotes.filter(n => n.relatedItems && n.relatedItems.includes(selectedItemId))
+      const noteIdsFromRelated = notesWithRelatedItem.map(n => n.id!).filter((id): id is number => id !== undefined)
+      
+      const allNoteIds = Array.from(new Set([...noteIdsFromTasks, ...noteIdsFromRelated]))
+      if (allNoteIds.length > 0) {
+        const notes = await db.meetingNotes.bulkGet(allNoteIds)
+        setRelatedNotes(notes.filter((n): n is MeetingNote => n !== undefined))
+      } else {
+        setRelatedNotes([])
+      }
+      
+      // Load related tasks
+      const sortedTasks = relevantTasks.sort((a, b) => {
+        const aCompleted = !!a.completedAt
+        const bCompleted = !!b.completedAt
+        if (aCompleted !== bCompleted) {
+          return aCompleted ? 1 : -1
+        }
+        return (b.createdAt || 0) - (a.createdAt || 0)
+      })
+      setRelatedTasks(sortedTasks)
+      
+      // Load related items (from relationships)
+      const itemRels = rels.filter(r => r.fromItemId === selectedItemId || r.toItemId === selectedItemId)
+      const relatedIds = new Set<number>()
+      itemRels.forEach(r => {
+        if (r.fromItemId === selectedItemId) relatedIds.add(r.toItemId)
+        if (r.toItemId === selectedItemId) relatedIds.add(r.fromItemId)
+      })
+      
+      if (relatedIds.size > 0) {
+        const relatedItems = await db.items.bulkGet(Array.from(relatedIds))
+        const map = new Map<number, ItemRecord>()
+        relatedItems.forEach(item => {
+          if (item) map.set(item.id!, item)
+        })
+        setRelatedItemsMap(map)
+      } else {
+        setRelatedItemsMap(new Map())
+      }
+    }
+    
+    loadRelatedData()
+  }, [selectedItemId, rels])
+  
 
   // Load lenses from database
   useEffect(() => {
@@ -102,6 +207,16 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     localStorage.setItem('graph-show-parent-boxes', showParentBoxes.toString())
   }, [showParentBoxes])
 
+  // Listen for theme changes
+  useEffect(() => {
+    function handleThemeChange() {
+      setTheme(loadTheme())
+    }
+    window.addEventListener('themeUpdated', handleThemeChange)
+    return () => {
+      window.removeEventListener('themeUpdated', handleThemeChange)
+    }
+  }, [])
 
   // Delay showing instructions by 1 second when selection/hover changes
   useEffect(() => {
@@ -170,6 +285,9 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   useEffect(() => {
     if (!selectedItemId) {
       setFilterToRelated(false)
+      setShowDetailsBox(true) // Reset to show when new item is selected
+    } else {
+      setShowDetailsBox(true) // Show details box when item is selected
     }
   }, [selectedItemId])
 
@@ -713,22 +831,70 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     }
     
     // Position visible top-level managers in a row, with their hierarchies below
+    // First pass: position all managers (left-aligned for now)
+    const managerWidths = new Map<string, number>()
     let currentX = padding
     let currentY = firstBoxTop
     let maxY = currentY
+    const rowBreaks: number[] = [0] // Track where each row starts
     
-    visibleTopLevel.forEach((managerName) => {
+    visibleTopLevel.forEach((managerName, idx) => {
       const result = positionManager(managerName, currentX, currentY, 0)
+      managerWidths.set(managerName, result.width)
       currentX += result.width + managerGap
       maxY = Math.max(maxY, result.y + result.height / 2 + managerBoxHeight / 2)
       
       // If we've exceeded available width, start a new row
       if (currentX + managerWidth > availableW - padding) {
+        rowBreaks.push(idx + 1)
         currentX = padding
         currentY = maxY + managerBoxHeight + verticalGap
         maxY = currentY
       }
     })
+    rowBreaks.push(visibleTopLevel.length) // Mark end of last row
+    
+    // Second pass: center each row
+    const adjustChildrenPositions = (name: string, offsetX: number) => {
+      const children = hierarchy.get(name) || []
+      children.forEach(child => {
+        if (visibleManagers.has(child)) {
+          const childPos = positions.get(child)
+          if (childPos) {
+            positions.set(child, { x: childPos.x + offsetX, y: childPos.y })
+            adjustChildrenPositions(child, offsetX)
+          }
+        }
+      })
+    }
+    
+    for (let rowIdx = 0; rowIdx < rowBreaks.length - 1; rowIdx++) {
+      const rowStart = rowBreaks[rowIdx]
+      const rowEnd = rowBreaks[rowIdx + 1]
+      
+      if (rowStart >= rowEnd) continue
+      
+      // Calculate total width of this row
+      let rowWidth = 0
+      for (let i = rowStart; i < rowEnd; i++) {
+        const width = managerWidths.get(visibleTopLevel[i]) || managerWidth
+        rowWidth += width + (i > rowStart ? managerGap : 0)
+      }
+      
+      // Calculate offset to center this row
+      const rowStartX = (availableW - rowWidth) / 2
+      const offset = rowStartX - padding
+      
+      // Adjust all managers and their children in this row
+      for (let i = rowStart; i < rowEnd; i++) {
+        const managerName = visibleTopLevel[i]
+        const pos = positions.get(managerName)
+        if (pos) {
+          positions.set(managerName, { x: pos.x + offset, y: pos.y })
+          adjustChildrenPositions(managerName, offset)
+        }
+      }
+    }
     
     return positions
   }, [viewMode, managerHierarchy, dims.w, zoom, visibleManagers])
@@ -772,6 +938,20 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     return layoutResult
   }, [filteredItems, dims, visibleLenses, layoutMode, showParentBoxes, zoom, viewMode, managerPositions])
 
+  // Determine if selected item is on left or right side of diagram
+  const detailsBoxPosition = useMemo(() => {
+    if (!selectedItemId || !layout.positions.has(selectedItemId)) {
+      return 'right' // Default to right
+    }
+    const itemPos = layout.positions.get(selectedItemId)
+    if (!itemPos) return 'right'
+    
+    // Get the total width of the layout
+    const layoutWidth = layout.width
+    // If item is on the right half, show box on left; if on left half, show box on right
+    return itemPos.x > layoutWidth / 2 ? 'left' : 'right'
+  }, [selectedItemId, layout])
+
   function posFor(id?: number) {
     if (!id) return { x: 0, y: 0 }
     const p = layout.positions.get(id)
@@ -802,6 +982,28 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
 
   // Get colors based on lifecycle status
   function getLifecycleColor(status?: LifecycleStatus): { fill: string; stroke: string } {
+    // Use theme colors for Summary view, hardcoded colors for other views
+    if (viewMode === 'summary') {
+      if (status === 'Divest') {
+        return { fill: theme.colors.error + '1a', stroke: theme.colors.error }
+      }
+      if (status === 'Invest') {
+        return { fill: theme.colors.success + '1a', stroke: theme.colors.success }
+      }
+      if (status === 'Plan') {
+        return { fill: theme.colors.info + '1a', stroke: theme.colors.info }
+      }
+      if (status === 'Emerging') {
+        return { fill: theme.colors.warning + '1a', stroke: theme.colors.warning }
+      }
+      if (!status) {
+        return { fill: theme.colors.primary + '1a', stroke: theme.colors.primary }
+      }
+      // Stable and any other statuses - use theme primary color
+      return { fill: theme.colors.primary + '1a', stroke: theme.colors.primary }
+    }
+    
+    // For other views (Tasks, Tags, Architecture coverage), use hardcoded colors
     switch (status) {
       case 'Plan':
         return { fill: '#f3f4f6', stroke: '#9ca3af' } // Grey
@@ -972,6 +1174,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
       lenses: visibleLenses,
       tasks,
       viewMode,
+      theme,
       layoutMode,
       zoom,
       showParentBoxes,
@@ -1128,6 +1331,29 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     }
     
     function getLifecycleColor(status) {
+      // Use theme colors for Summary view, hardcoded colors for other views
+      if (exportData.viewMode === 'summary') {
+        const theme = exportData.theme;
+        if (status === 'Divest') {
+          return { fill: theme.colors.error + '1a', stroke: theme.colors.error };
+        }
+        if (status === 'Invest') {
+          return { fill: theme.colors.success + '1a', stroke: theme.colors.success };
+        }
+        if (status === 'Plan') {
+          return { fill: theme.colors.info + '1a', stroke: theme.colors.info };
+        }
+        if (status === 'Emerging') {
+          return { fill: theme.colors.warning + '1a', stroke: theme.colors.warning };
+        }
+        if (!status) {
+          return { fill: theme.colors.primary + '1a', stroke: theme.colors.primary };
+        }
+        // Stable and any other statuses - use theme primary color
+        return { fill: theme.colors.primary + '1a', stroke: theme.colors.primary };
+      }
+      
+      // For other views (Tasks, Tags, Architecture coverage), use hardcoded colors
       switch (status) {
         case 'Plan': return { fill: '#f3f4f6', stroke: '#9ca3af' };
         case 'Emerging': return { fill: '#fef3c7', stroke: '#f59e0b' };
@@ -1421,7 +1647,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
                   onChange={e => setViewMode(e.target.value as 'skillGaps' | 'tags' | 'summary' | 'tasks')}
                   className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                 >
-                  <option value="skillGaps">Architecture coverage (by SME)</option>
+                  <option value="skillGaps">Architecture coverage</option>
                   <option value="tags">Tags</option>
                   <option value="summary">Summary</option>
                   <option value="tasks">Tasks</option>
@@ -1512,33 +1738,6 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             </text>
           </g>
         ))}
-        {/* Links with labels (relationship type and note) */}
-        {((filterToRelated && selectedItemId) ? showRelationshipLines : true) && visibleRels.map((r, i) => {
-          const a = posFor(r.fromItemId)
-          const b = posFor(r.toItemId)
-          const midX = (a.x + b.x) / 2
-          const midY = (a.y + b.y) / 2
-          const key = r.id ? `rel-${r.id}` : `rel-${r.fromItemId}-${r.toItemId}-${i}`
-          const typeLabel = r.relationshipType && r.relationshipType !== 'Default' ? r.relationshipType : null
-          const noteLabel = r.note && r.note.trim() ? r.note.trim() : null
-          const label = [typeLabel, noteLabel].filter(Boolean).join(' • ')
-          return (
-            <g key={key}>
-              <path d={`M ${a.x} ${a.y} C ${midX} ${a.y}, ${midX} ${b.y}, ${b.x} ${b.y}`} fill="none" stroke="#3b82f6" strokeWidth={2} />
-              {label && (
-                <text
-                  x={midX}
-                  y={midY - 6}
-                  textAnchor="middle"
-                  className="fill-slate-700 dark:fill-slate-200"
-                  style={{ fontSize: 10, pointerEvents: 'none' }}
-                >
-                  {label}
-                </text>
-              )}
-            </g>
-          )
-        })}
         
         {/* Manager relationship lines (parent to child) - always visible, render before boxes so lines appear behind */}
         {viewMode === 'skillGaps' && Array.from(managerHierarchy.hierarchy.entries())
@@ -1727,6 +1926,72 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
                     </svg>
                   </button>
                 </foreignObject>
+              )}
+            </g>
+          )
+        })}
+        
+        {/* Relationship lines - render BEFORE nodes so they appear behind in SVG z-order */}
+        {((filterToRelated && selectedItemId) ? showRelationshipLines : true) && visibleRels.map((r, i) => {
+          const a = posFor(r.fromItemId)
+          const b = posFor(r.toItemId)
+          const nodeHalfHeight = layout.nodeHeight / 2
+          const nodeHalfWidth = layout.nodeWidth / 2
+          
+          // Determine connection points based on vertical position
+          // If destination is below source: start at bottom of source, end at top of destination
+          // If destination is above source: start at top of source, end at bottom of destination
+          // If same level: use left/right edges
+          let startX = a.x
+          let startY = a.y
+          let endX = b.x
+          let endY = b.y
+          
+          const verticalDiff = b.y - a.y
+          
+          if (Math.abs(verticalDiff) > 10) {
+            // Significant vertical difference - use top/bottom edges
+            if (verticalDiff > 0) {
+              // Destination is below source
+              startY = a.y + nodeHalfHeight
+              endY = b.y - nodeHalfHeight
+            } else {
+              // Destination is above source
+              startY = a.y - nodeHalfHeight
+              endY = b.y + nodeHalfHeight
+            }
+          } else {
+            // Same level - use left/right edges
+            if (b.x > a.x) {
+              // Destination is to the right
+              startX = a.x + nodeHalfWidth
+              endX = b.x - nodeHalfWidth
+            } else {
+              // Destination is to the left
+              startX = a.x - nodeHalfWidth
+              endX = b.x + nodeHalfWidth
+            }
+          }
+          
+          const midX = (startX + endX) / 2
+          const midY = (startY + endY) / 2
+          const key = r.id ? `rel-${r.id}` : `rel-${r.fromItemId}-${r.toItemId}-${i}`
+          const typeLabel = r.relationshipType && r.relationshipType !== 'Default' ? r.relationshipType : null
+          const noteLabel = r.note && r.note.trim() ? r.note.trim() : null
+          const label = [typeLabel, noteLabel].filter(Boolean).join(' • ')
+          return (
+            <g key={key} style={{ pointerEvents: 'none' }}>
+              <path d={`M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`} fill="none" stroke="#3b82f6" strokeWidth={2} />
+              {label && (
+                <text
+                  x={midX}
+                  y={midY - 6}
+                  textAnchor="middle"
+                  className="fill-slate-700 dark:fill-slate-200"
+                  style={{ fontSize: 10, pointerEvents: 'none' }}
+                >
+                  {label}
+                </text>
               )}
             </g>
           )
@@ -2225,6 +2490,202 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
         })}
       </svg>
       </div>
+      
+      {/* Floating Item Details Box */}
+      {selectedItemId && selectedItem && showDetailsBox && (
+        <div className={`absolute top-2 ${detailsBoxPosition === 'left' ? 'left-2' : 'right-2'} z-20 w-96 max-h-[calc(100vh-4rem)] overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg p-4`}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">
+              {lensLabel(selectedItem.lens)}: {selectedItem.name}
+            </h3>
+            <button
+              onClick={() => setShowDetailsBox(false)}
+              className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              title="Hide details"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+          <div className="space-y-3 text-xs">
+            {selectedItem.description && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Description</div>
+                <div className="text-slate-600 dark:text-slate-400 whitespace-pre-wrap">{selectedItem.description}</div>
+              </div>
+            )}
+            {selectedItem.lifecycleStatus && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Lifecycle Status</div>
+                <div className="text-slate-600 dark:text-slate-400">{selectedItem.lifecycleStatus}</div>
+              </div>
+            )}
+            {selectedItem.businessContact && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Business Contact</div>
+                <div className="text-slate-600 dark:text-slate-400">{selectedItem.businessContact}</div>
+              </div>
+            )}
+            {selectedItem.techContact && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Tech Contact</div>
+                <div className="text-slate-600 dark:text-slate-400">{selectedItem.techContact}</div>
+              </div>
+            )}
+            {selectedItem.primaryArchitect && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Primary SME Architect</div>
+                <div className="text-slate-600 dark:text-slate-400">{selectedItem.primaryArchitect}</div>
+              </div>
+            )}
+            {selectedItem.secondaryArchitects && selectedItem.secondaryArchitects.length > 0 && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Secondary SME Architects</div>
+                <div className="text-slate-600 dark:text-slate-400">{selectedItem.secondaryArchitects.join(', ')}</div>
+              </div>
+            )}
+            {selectedItem.tags && selectedItem.tags.length > 0 && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Tags</div>
+                <div className="text-slate-600 dark:text-slate-400">{selectedItem.tags.join(', ')}</div>
+              </div>
+            )}
+            {selectedItem.skillsGaps && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Skills Gaps</div>
+                <div className="text-slate-600 dark:text-slate-400 whitespace-pre-wrap">{selectedItem.skillsGaps}</div>
+              </div>
+            )}
+            {selectedItem.parent && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Parent</div>
+                <div className="text-slate-600 dark:text-slate-400">{selectedItem.parent}</div>
+              </div>
+            )}
+            {selectedItem.hyperlinks && selectedItem.hyperlinks.length > 0 && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Hyperlinks</div>
+                <div className="space-y-1">
+                  {selectedItem.hyperlinks.map((link, idx) => (
+                    <div key={idx}>
+                      <a
+                        href={link.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        {link.label || link.url}
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Related Tasks */}
+            {relatedTasks.length > 0 && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Related Tasks</div>
+                <div className="space-y-1">
+                  {relatedTasks.map((task) => (
+                    <div key={task.id} className="text-slate-600 dark:text-slate-400">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleToggleTaskComplete(task)}
+                          className="flex-shrink-0 w-4 h-4 border border-slate-400 dark:border-slate-600 rounded flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
+                          title={task.completedAt ? 'Mark as incomplete' : 'Mark as complete'}
+                        >
+                          {task.completedAt && (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="text-green-600 dark:text-green-400">
+                              <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                          )}
+                        </button>
+                        <span className={task.completedAt ? 'line-through text-slate-400 dark:text-slate-500' : ''}>
+                          {task.description || '(No description)'}
+                        </span>
+                      </div>
+                      {task.assignedTo && (
+                        <div className="text-xs text-slate-500 dark:text-slate-500 ml-6">
+                          Assigned to: {task.assignedTo}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Related Notes */}
+            {relatedNotes.length > 0 && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Related Notes</div>
+                <div className="space-y-1">
+                  {relatedNotes.map((note) => (
+                    <div key={note.id} className="text-slate-600 dark:text-slate-400">
+                      <button
+                        onClick={() => {
+                          window.dispatchEvent(new CustomEvent('openMeetingNote', { detail: { noteId: note.id } }))
+                        }}
+                        className="text-blue-600 dark:text-blue-400 hover:underline text-left"
+                      >
+                        {note.title || `Note from ${note.dateTime ? new Date(note.dateTime).toLocaleDateString() : 'unknown date'}`}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Related Items */}
+            {relatedItemsMap.size > 0 && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Related Items</div>
+                <div className="space-y-1">
+                  {Array.from(relatedItemsMap.entries()).map(([itemId, relatedItem]) => {
+                    const rel = rels.find(r => 
+                      (r.fromItemId === selectedItemId && r.toItemId === itemId) ||
+                      (r.toItemId === selectedItemId && r.fromItemId === itemId)
+                    )
+                    return (
+                      <div key={itemId} className="text-slate-600 dark:text-slate-400">
+                        <span className="font-medium">{lensLabel(relatedItem.lens)}:</span> {relatedItem.name}
+                        {rel?.relationshipType && rel.relationshipType !== 'Default' && (
+                          <span className="text-xs text-slate-500 dark:text-slate-500 ml-1">
+                            ({rel.relationshipType})
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+            
+            {!selectedItem.description && !selectedItem.lifecycleStatus && !selectedItem.businessContact && 
+             !selectedItem.techContact && !selectedItem.primaryArchitect && 
+             (!selectedItem.secondaryArchitects || selectedItem.secondaryArchitects.length === 0) &&
+             (!selectedItem.tags || selectedItem.tags.length === 0) && !selectedItem.skillsGaps && 
+             !selectedItem.parent && (!selectedItem.hyperlinks || selectedItem.hyperlinks.length === 0) &&
+             relatedItemsMap.size === 0 && relatedNotes.length === 0 && relatedTasks.length === 0 && (
+              <div className="text-slate-500 dark:text-slate-400 italic">No additional details</div>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {/* Show details button when item is selected but box is hidden */}
+      {selectedItemId && selectedItem && !showDetailsBox && (
+        <button
+          onClick={() => setShowDetailsBox(true)}
+          className={`absolute top-2 ${detailsBoxPosition === 'left' ? 'left-2' : 'right-2'} z-20 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800`}
+          title="Show item details"
+        >
+          Show Details
+        </button>
+      )}
       
       {/* Edit Dialog */}
       <ItemDialog

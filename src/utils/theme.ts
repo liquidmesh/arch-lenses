@@ -87,3 +87,4 @@ export function applyTheme(theme: Theme): void {
   root.style.setProperty('--theme-font-mono', theme.fonts.mono)
 }
 
+

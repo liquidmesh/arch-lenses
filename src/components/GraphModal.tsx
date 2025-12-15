@@ -2640,29 +2640,58 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             )}
             
             {/* Related Items */}
-            {relatedItemsMap.size > 0 && (
-              <div>
-                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Related Items</div>
-                <div className="space-y-1">
-                  {Array.from(relatedItemsMap.entries()).map(([itemId, relatedItem]) => {
-                    const rel = rels.find(r => 
-                      (r.fromItemId === selectedItemId && r.toItemId === itemId) ||
-                      (r.toItemId === selectedItemId && r.fromItemId === itemId)
-                    )
-                    return (
-                      <div key={itemId} className="text-slate-600 dark:text-slate-400">
-                        <span className="font-medium">{lensLabel(relatedItem.lens)}:</span> {relatedItem.name}
-                        {rel?.relationshipType && rel.relationshipType !== 'Default' && (
-                          <span className="text-xs text-slate-500 dark:text-slate-500 ml-1">
-                            ({rel.relationshipType})
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })}
+            {relatedItemsMap.size > 0 && (() => {
+              // Group items by lens
+              const itemsByLens = new Map<string, Array<{ itemId: number; item: ItemRecord; rel: RelationshipRecord | undefined }>>()
+              Array.from(relatedItemsMap.entries()).forEach(([itemId, relatedItem]) => {
+                const rel = rels.find(r => 
+                  (r.fromItemId === selectedItemId && r.toItemId === itemId) ||
+                  (r.toItemId === selectedItemId && r.fromItemId === itemId)
+                )
+                if (!itemsByLens.has(relatedItem.lens)) {
+                  itemsByLens.set(relatedItem.lens, [])
+                }
+                itemsByLens.get(relatedItem.lens)!.push({ itemId, item: relatedItem, rel })
+              })
+              
+              // Sort lenses alphabetically
+              const sortedLenses = Array.from(itemsByLens.keys()).sort((a, b) => 
+                lensLabel(a).localeCompare(lensLabel(b))
+              )
+              
+              return (
+                <div>
+                  <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Related Items</div>
+                  <div className="space-y-2">
+                    {sortedLenses.map(lens => {
+                      const lensItems = itemsByLens.get(lens)!
+                      // Sort items within each lens alphabetically
+                      lensItems.sort((a, b) => a.item.name.localeCompare(b.item.name))
+                      
+                      return (
+                        <div key={lens}>
+                          <div className="font-medium text-slate-700 dark:text-slate-300 mb-0.5 text-xs">
+                            {lensLabel(lens)}
+                          </div>
+                          <div className="space-y-0.5 ml-2">
+                            {lensItems.map(({ itemId, item, rel }) => (
+                              <div key={itemId} className="text-slate-600 dark:text-slate-400">
+                                {item.name}
+                                {rel?.relationshipType && rel.relationshipType !== 'Default' && (
+                                  <span className="text-xs text-slate-500 dark:text-slate-500 ml-1">
+                                    ({rel.relationshipType})
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              )
+            })()}
             
             {!selectedItem.description && !selectedItem.lifecycleStatus && !selectedItem.businessContact && 
              !selectedItem.techContact && !selectedItem.primaryArchitect && 

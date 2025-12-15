@@ -1889,36 +1889,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     return secondaryToThirdLensMap.get(secondaryItemId) || new Set<number>()
   }
 
-  // Determine if item should span all columns or color specific columns
-  const getItemColumnSpan = (secondaryItemId: number | undefined): { span: number; relatedColumns: Set<number> } => {
-    if (!thirdLens || thirdLensItems.length === 0 || !secondaryItemId) {
-      return { span: 1, relatedColumns: new Set<number>() }
-    }
-    
-    const relatedThirdLensIds = getThirdLensRelationships(secondaryItemId)
-    const allThirdLensIds = new Set(thirdLensItems.map(item => item.id!).filter((id): id is number => id !== undefined))
-    
-    // If not related to any, span all
-    if (relatedThirdLensIds.size === 0) {
-      return { span: thirdLensItems.length, relatedColumns: new Set<number>() }
-    }
-    
-    // If related to all, span all
-    if (relatedThirdLensIds.size === allThirdLensIds.size) {
-      return { span: thirdLensItems.length, relatedColumns: new Set<number>() }
-    }
-    
-    // Related to some - return column indices (0-based) for related items
-    const relatedColumns = new Set<number>()
-    thirdLensItems.forEach((item, index) => {
-      if (item.id && relatedThirdLensIds.has(item.id)) {
-        relatedColumns.add(index)
-      }
-    })
-    
-    return { span: 1, relatedColumns }
-  }
-
   // Render a single item with third lens support
   const renderItemWithThirdLens = (
     item: ItemRecord,

@@ -61,7 +61,6 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   const [showDetailsBox, setShowDetailsBox] = useState(true)
   const [relatedNotes, setRelatedNotes] = useState<MeetingNote[]>([])
   const [relatedTasks, setRelatedTasks] = useState<Task[]>([])
-  const [relatedItemsMap, setRelatedItemsMap] = useState<Map<number, ItemRecord>>(new Map())
   
   const svgRef = useRef<SVGSVGElement>(null)
   
@@ -105,7 +104,6 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     if (!selectedItemId) {
       setRelatedNotes([])
       setRelatedTasks([])
-      setRelatedItemsMap(new Map())
       return
     }
     
@@ -139,25 +137,6 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
         return (b.createdAt || 0) - (a.createdAt || 0)
       })
       setRelatedTasks(sortedTasks)
-      
-      // Load related items (from relationships)
-      const itemRels = rels.filter(r => r.fromItemId === selectedItemId || r.toItemId === selectedItemId)
-      const relatedIds = new Set<number>()
-      itemRels.forEach(r => {
-        if (r.fromItemId === selectedItemId) relatedIds.add(r.toItemId)
-        if (r.toItemId === selectedItemId) relatedIds.add(r.fromItemId)
-      })
-      
-      if (relatedIds.size > 0) {
-        const relatedItems = await db.items.bulkGet(Array.from(relatedIds))
-        const map = new Map<number, ItemRecord>()
-        relatedItems.forEach(item => {
-          if (item) map.set(item.id!, item)
-        })
-        setRelatedItemsMap(map)
-      } else {
-        setRelatedItemsMap(new Map())
-      }
     }
     
     loadRelatedData()
@@ -2639,66 +2618,12 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
               </div>
             )}
             
-            {/* Related Items */}
-            {relatedItemsMap.size > 0 && (() => {
-              // Group items by lens
-              const itemsByLens = new Map<string, Array<{ itemId: number; item: ItemRecord; rel: RelationshipRecord | undefined }>>()
-              Array.from(relatedItemsMap.entries()).forEach(([itemId, relatedItem]) => {
-                const rel = rels.find(r => 
-                  (r.fromItemId === selectedItemId && r.toItemId === itemId) ||
-                  (r.toItemId === selectedItemId && r.fromItemId === itemId)
-                )
-                if (!itemsByLens.has(relatedItem.lens)) {
-                  itemsByLens.set(relatedItem.lens, [])
-                }
-                itemsByLens.get(relatedItem.lens)!.push({ itemId, item: relatedItem, rel })
-              })
-              
-              // Sort lenses alphabetically
-              const sortedLenses = Array.from(itemsByLens.keys()).sort((a, b) => 
-                lensLabel(a).localeCompare(lensLabel(b))
-              )
-              
-              return (
-                <div>
-                  <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Related Items</div>
-                  <div className="space-y-2">
-                    {sortedLenses.map(lens => {
-                      const lensItems = itemsByLens.get(lens)!
-                      // Sort items within each lens alphabetically
-                      lensItems.sort((a, b) => a.item.name.localeCompare(b.item.name))
-                      
-                      return (
-                        <div key={lens}>
-                          <div className="font-medium text-slate-700 dark:text-slate-300 mb-0.5 text-xs">
-                            {lensLabel(lens)}
-                          </div>
-                          <div className="space-y-0.5 ml-2">
-                            {lensItems.map(({ itemId, item, rel }) => (
-                              <div key={itemId} className="text-slate-600 dark:text-slate-400">
-                                {item.name}
-                                {rel?.relationshipType && rel.relationshipType !== 'Default' && (
-                                  <span className="text-xs text-slate-500 dark:text-slate-500 ml-1">
-                                    ({rel.relationshipType})
-                                  </span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })()}
-            
             {!selectedItem.description && !selectedItem.lifecycleStatus && !selectedItem.businessContact && 
              !selectedItem.techContact && !selectedItem.primaryArchitect && 
              (!selectedItem.secondaryArchitects || selectedItem.secondaryArchitects.length === 0) &&
              (!selectedItem.tags || selectedItem.tags.length === 0) && !selectedItem.skillsGaps && 
              !selectedItem.parent && (!selectedItem.hyperlinks || selectedItem.hyperlinks.length === 0) &&
-             relatedItemsMap.size === 0 && relatedNotes.length === 0 && relatedTasks.length === 0 && (
+             relatedNotes.length === 0 && relatedTasks.length === 0 && (
               <div className="text-slate-500 dark:text-slate-400 italic">No additional details</div>
             )}
           </div>

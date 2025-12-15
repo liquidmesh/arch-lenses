@@ -42,9 +42,9 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     return saved ? parseInt(saved, 10) : null
   })
   const [filterItemQuery, setFilterItemQuery] = useState('')
-  const [minorTextOption, setMinorTextOption] = useState<'none' | 'lifecycle' | 'description'>(() => {
+  const [minorTextOption, setMinorTextOption] = useState<'none' | 'lifecycle' | 'description' | 'people'>(() => {
     const saved = localStorage.getItem('divest-replacement-minor-text')
-    return (saved === 'none' || saved === 'lifecycle' || saved === 'description') ? saved : 'lifecycle'
+    return (saved === 'none' || saved === 'lifecycle' || saved === 'description' || saved === 'people') ? saved : 'lifecycle'
   })
   const [rollupLens, setRollupLens] = useState<LensKey | '' | '__parent__'>(() => {
     const saved = localStorage.getItem('divest-replacement-rollup-lens')
@@ -172,6 +172,13 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     if (filterItemId) {
       const filterItem = items.find(item => item.id === filterItemId)
       if (filterItem) {
+        // If filter item is from third lens, don't filter primary items - they will be filtered by secondary items instead
+        if (thirdLens && filterItem.lens === thirdLens) {
+          // Don't filter primary items - return all primary items
+          return filtered.sort((a, b) => a.name.localeCompare(b.name))
+        }
+        
+        // Otherwise, filter to only show items related to the filter item
         // Find relationships where filterItem is involved
         const relatedRels = relationships.filter(rel => {
           return (
@@ -201,7 +208,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     }
     
     return filtered.sort((a, b) => a.name.localeCompare(b.name))
-  }, [items, primaryLens, filterItemId, relationships])
+  }, [items, primaryLens, filterItemId, relationships, thirdLens])
 
   // Get items from primary lens (for display purposes, use filteredPrimaryItems)
   const primaryItems = filteredPrimaryItems
@@ -240,6 +247,51 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       let relatedItems = items.filter(item => 
         item.lens === secondaryLens && relatedItemIds.has(item.id!)
       )
+
+      // If a third lens filter item is selected, filter secondary items to only show:
+      // 1. Items related to the filter item
+      // 2. Items with no relationships to any third lens items
+      if (filterItemId && thirdLens) {
+        const filterItem = items.find(item => item.id === filterItemId)
+        if (filterItem && filterItem.lens === thirdLens) {
+          // Get all third lens item IDs
+          const allThirdLensItemIds = new Set(
+            items
+              .filter(item => item.lens === thirdLens)
+              .map(item => item.id!)
+              .filter((id): id is number => id !== undefined)
+          )
+          
+          // Filter relatedItems to only include:
+          // - Items related to the filter item
+          // - Items with no relationships to any third lens items
+          relatedItems = relatedItems.filter(secondaryItem => {
+            if (!secondaryItem.id) return false
+            
+            // Check if this secondary item is related to the filter item
+            const isRelatedToFilter = relationships.some(rel => {
+              return (
+                (rel.fromItemId === secondaryItem.id && rel.toItemId === filterItemId) ||
+                (rel.toItemId === secondaryItem.id && rel.fromItemId === filterItemId)
+              )
+            })
+            
+            if (isRelatedToFilter) return true
+            
+            // Check if this secondary item has any relationships to third lens items
+            const hasThirdLensRelationships = relationships.some(rel => {
+              const otherItemId = rel.fromItemId === secondaryItem.id ? rel.toItemId : rel.fromItemId
+              return (
+                (rel.fromItemId === secondaryItem.id && allThirdLensItemIds.has(otherItemId)) ||
+                (rel.toItemId === secondaryItem.id && allThirdLensItemIds.has(otherItemId))
+              )
+            })
+            
+            // Include if it has no third lens relationships
+            return !hasThirdLensRelationships
+          })
+        }
+      }
 
       // Build roll-up maps if roll-up is enabled (used for both filtering and grouping)
       let secondaryToRollupMap: Map<number, ItemRecord[]> | null = null
@@ -512,7 +564,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
         itemRelLifecycleMap, // Include for consistency
       }
     })
-  }, [primaryItems, secondaryLens, items, relationships, primaryLens, rollupLens, rollupMode])
+  }, [primaryItems, secondaryLens, items, relationships, primaryLens, rollupLens, rollupMode, filterItemId, thirdLens])
 
   // Calculate secondary items that have no relationships to any primary items
   const unrelatedSecondaryItems = useMemo(() => {
@@ -546,12 +598,23 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
   }, [primaryLens, secondaryLens, primaryItems, items, relationships])
 
   // Get third lens items (sorted by name)
+  // If a filter item is selected from the third lens, only show that item
   const thirdLensItems = useMemo(() => {
     if (!thirdLens) return []
-    return items
+    let thirdLensItemsList = items
       .filter(item => item.lens === thirdLens)
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [thirdLens, items])
+    
+    // If filter item is from third lens, only show that item
+    if (filterItemId) {
+      const filterItem = items.find(item => item.id === filterItemId)
+      if (filterItem && filterItem.lens === thirdLens) {
+        thirdLensItemsList = [filterItem]
+      }
+    }
+    
+    return thirdLensItemsList
+  }, [thirdLens, items, filterItemId])
 
   // Map of secondary item ID to set of third lens item IDs it's related to
   const secondaryToThirdLensMap = useMemo(() => {
@@ -662,6 +725,15 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
   // Get outline classes (keep outline classes, override color with inline style)
   const getOutlineClasses = (): string => {
     return 'outline outline-2 outline-offset-[-1px]'
+  }
+
+  // Helper function to format people information
+  const getPeopleText = (item: ItemRecord): string => {
+    const people: string[] = []
+    if (item.businessContact) people.push(item.businessContact)
+    if (item.techContact) people.push(item.techContact)
+    if (item.primaryArchitect) people.push(item.primaryArchitect)
+    return people.join(', ') || ''
   }
 
   const getLifecycleLabel = (status?: LifecycleStatus): string => {
@@ -1057,6 +1129,18 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                     minor.textContent = line
                     svg.appendChild(minor)
                   })
+                } else if (minorTextOption === 'people' && getPeopleText(group.rollupItem)) {
+                  const peopleText = getPeopleText(group.rollupItem)
+                  const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
+                  peopleLines.forEach((line, idx) => {
+                    const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                    minor.setAttribute('x', String(boxX + boxWidth / 2))
+                    minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                    minor.setAttribute('class', 'item-minor')
+                    minor.setAttribute('text-anchor', 'middle')
+                    minor.textContent = line
+                    svg.appendChild(minor)
+                  })
                 }
               }
               
@@ -1106,6 +1190,18 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 } else if (minorTextOption === 'description' && group.rollupItem.description) {
                   const descLines = wrapText(group.rollupItem.description, boxWidth - 8, 8)
                   descLines.forEach((line, idx) => {
+                    const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                    minor.setAttribute('x', String(boxX + boxWidth / 2))
+                    minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                    minor.setAttribute('class', 'item-minor')
+                    minor.setAttribute('text-anchor', 'middle')
+                    minor.textContent = line
+                    svg.appendChild(minor)
+                  })
+                } else if (minorTextOption === 'people' && getPeopleText(group.rollupItem)) {
+                  const peopleText = getPeopleText(group.rollupItem)
+                  const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
+                  peopleLines.forEach((line, idx) => {
                     const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
                     minor.setAttribute('x', String(boxX + boxWidth / 2))
                     minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
@@ -1217,6 +1313,18 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                   minor.textContent = line
                   svg.appendChild(minor)
                 })
+              } else if (minorTextOption === 'people' && getPeopleText(item)) {
+                const peopleText = getPeopleText(item)
+                const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
+                peopleLines.forEach((line, idx) => {
+                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                  minor.setAttribute('x', String(boxX + boxWidth / 2))
+                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                  minor.setAttribute('class', 'item-minor')
+                  minor.setAttribute('text-anchor', 'middle')
+                  minor.textContent = line
+                  svg.appendChild(minor)
+                })
               }
             })
             }
@@ -1268,6 +1376,18 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               } else if (minorTextOption === 'description' && item.description) {
                 const descLines = wrapText(item.description, boxWidth - 8, 8)
                 descLines.forEach((line, idx) => {
+                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                  minor.setAttribute('x', String(boxX + boxWidth / 2))
+                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                  minor.setAttribute('class', 'item-minor')
+                  minor.setAttribute('text-anchor', 'middle')
+                  minor.textContent = line
+                  svg.appendChild(minor)
+                })
+              } else if (minorTextOption === 'people' && getPeopleText(item)) {
+                const peopleText = getPeopleText(item)
+                const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
+                peopleLines.forEach((line, idx) => {
                   const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
                   minor.setAttribute('x', String(boxX + boxWidth / 2))
                   minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
@@ -1927,6 +2047,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               {getLifecycleLabel(item.lifecycleStatus)}
             </div>
           )}
+          {minorTextOption === 'people' && getPeopleText(item) && (
+            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+              {getPeopleText(item)}
+            </div>
+          )}
         </div>
       )
     }
@@ -1962,6 +2087,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           {minorTextOption === 'lifecycle' && (
             <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
               {getLifecycleLabel(item.lifecycleStatus)}
+            </div>
+          )}
+          {minorTextOption === 'people' && getPeopleText(item) && (
+            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+              {getPeopleText(item)}
             </div>
           )}
         </div>
@@ -2002,6 +2132,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               {getLifecycleLabel(item.lifecycleStatus)}
             </div>
           )}
+          {minorTextOption === 'people' && getPeopleText(item) && (
+            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+              {getPeopleText(item)}
+            </div>
+          )}
         </div>
       )
     })
@@ -2009,7 +2144,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
-      <div className="sticky top-0 z-10 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+      <div className="flex-shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
         <div className="p-2 sm:p-3">
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
             <h1 className="text-lg sm:text-xl font-semibold shrink-0">Target View</h1>
@@ -2124,7 +2259,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                     className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 w-full sm:w-40 min-w-0"
                   />
                   {filterItemQuery.trim() && !selectedFilterItem && filterItemOptions.length > 0 && (
-                    <div className="absolute z-10 mt-1 w-full sm:w-64 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded shadow-lg max-h-60 overflow-y-auto">
+                    <div className="absolute z-50 mt-1 w-full sm:w-64 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded shadow-lg max-h-60 overflow-y-auto">
                       {filterItemOptions.map(option => (
                         <button
                           key={option.id}
@@ -2164,12 +2299,13 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 <span className="text-xs whitespace-nowrap">Minor:</span>
                 <select
                   value={minorTextOption}
-                  onChange={e => setMinorTextOption(e.target.value as 'none' | 'lifecycle' | 'description')}
+                  onChange={e => setMinorTextOption(e.target.value as 'none' | 'lifecycle' | 'description' | 'people')}
                   className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 min-w-0"
                 >
                   <option value="none">None</option>
                   <option value="lifecycle">Status</option>
                   <option value="description">Desc</option>
+                  <option value="people">People</option>
                 </select>
               </label>
               {primaryLens && secondaryLens && unrelatedSecondaryItems.length > 0 && (
@@ -2187,7 +2323,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           </div>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="flex-1 overflow-y-auto px-3 pb-3">
         {primaryLens && secondaryLens ? (
           itemAnalysis.length > 0 ? (
             <div ref={contentRef} className="max-w-7xl mx-auto">
@@ -2205,7 +2341,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                       })(),
                       gap: '0.75rem'
                     }}
-                    className="sticky top-0 z-10 bg-white dark:bg-slate-900 pb-1 border-b-2 border-slate-300 dark:border-slate-700"
+                    className="sticky top-0 z-20 bg-white dark:bg-slate-900 pb-1 pt-1 px-3 -mx-3 border-b-2 border-slate-300 dark:border-slate-700"
                   >
                     <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
                       {LENSES.find(l => l.key === primaryLens)?.label || primaryLens}
@@ -2265,7 +2401,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                       })(),
                       gap: '0.75rem'
                     }}
-                    className="sticky top-[1.75rem] z-10 bg-white dark:bg-slate-900 pb-2 border-b-2 border-slate-300 dark:border-slate-700"
+                    className="sticky top-[1.75rem] z-20 bg-white dark:bg-slate-900 pb-2 pt-1 px-3 -mx-3 border-b-2 border-slate-300 dark:border-slate-700"
                   >
                     <div></div>
                     {hasAnyLifecycleStatus ? (
@@ -2313,7 +2449,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                   if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
                   if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
                   return 'grid-cols-[200px_1fr]'
-                })()} sticky top-0 z-10 bg-white dark:bg-slate-900 gap-3 mb-2 pb-2 border-b-2 border-slate-300 dark:border-slate-700`}>
+                })()} sticky top-0 z-20 bg-white dark:bg-slate-900 gap-3 mb-2 pb-2 pt-2 px-3 -mx-3 border-b-2 border-slate-300 dark:border-slate-700`}>
                   <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
                     {LENSES.find(l => l.key === primaryLens)?.label || primaryLens}
                   </div>
@@ -2529,6 +2665,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                   {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
                                                 </div>
                                               )}
+                                              {minorTextOption === 'people' && getPeopleText(group.rollupItem) && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {getPeopleText(group.rollupItem)}
+                                                </div>
+                                              )}
                                             </div>
                                           </div>
                                         ) : null}
@@ -2683,6 +2824,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                   {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
                                                 </div>
                                               )}
+                                              {minorTextOption === 'people' && getPeopleText(group.rollupItem) && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {getPeopleText(group.rollupItem)}
+                                                </div>
+                                              )}
                                             </div>
                                           </div>
                                         ) : null}
@@ -2833,7 +2979,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           ) : hasTargetItemsOverall ? (
                                             null
                                           ) : (
-                                            <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                            <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2 text-center">
                                               No Target items
                                             </div>
                                           )}
@@ -2897,7 +3043,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           ) : hasTargetItemsOverall ? (
                                             null
                                           ) : (
-                                            <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                            <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2 text-center">
                                               No Target items
                                             </div>
                                           )}
@@ -2973,6 +3119,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                               {minorTextOption === 'lifecycle' && (
                                                 <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
                                                   {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
+                                                </div>
+                                              )}
+                                              {minorTextOption === 'people' && getPeopleText(group.rollupItem) && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {getPeopleText(group.rollupItem)}
                                                 </div>
                                               )}
                                             </div>
@@ -3125,6 +3276,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
                                                     </div>
                                                   )}
+                                                  {minorTextOption === 'people' && getPeopleText(group.rollupItem) && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {getPeopleText(group.rollupItem)}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               </div>
                                             ) : null}
@@ -3169,6 +3325,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                   {minorTextOption === 'lifecycle' && (
                                                     <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
                                                       {getLifecycleLabel(item.lifecycleStatus)}
+                                                    </div>
+                                                  )}
+                                                  {minorTextOption === 'people' && getPeopleText(item) && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {getPeopleText(item)}
                                                     </div>
                                                   )}
                                                 </div>
@@ -3324,6 +3485,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getLifecycleLabel(item.lifecycleStatus)}
                                                     </div>
                                                   )}
+                                                  {minorTextOption === 'people' && getPeopleText(item) && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {getPeopleText(item)}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )
                                             }
@@ -3372,6 +3538,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getLifecycleLabel(item.lifecycleStatus)}
                                                     </div>
                                                   )}
+                                                  {minorTextOption === 'people' && getPeopleText(item) && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {getPeopleText(item)}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )
                                             })
@@ -3414,7 +3585,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                     ) : (
                                       <div 
                                         style={columnViewMode === 'both' ? { gridColumn: '2' } : {}}
-                                        className="text-xs text-slate-500 dark:text-slate-400 italic py-2"
+                                        className="text-xs text-slate-500 dark:text-slate-400 italic py-2 text-center"
                                       >
                                         No Current items
                                       </div>
@@ -3485,6 +3656,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getLifecycleLabel(item.lifecycleStatus)}
                                                     </div>
                                                   )}
+                                                  {minorTextOption === 'people' && getPeopleText(item) && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {getPeopleText(item)}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )
                                             }
@@ -3533,6 +3709,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getLifecycleLabel(item.lifecycleStatus)}
                                                     </div>
                                                   )}
+                                                  {minorTextOption === 'people' && getPeopleText(item) && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {getPeopleText(item)}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )
                                             })
@@ -3575,7 +3756,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                     ) : (
                                       <div 
                                         style={columnViewMode === 'both' ? { gridColumn: '3' } : {}}
-                                        className="text-xs text-slate-500 dark:text-slate-400 italic py-2"
+                                        className="text-xs text-slate-500 dark:text-slate-400 italic py-2 text-center"
                                       >
                                         No Target items
                                       </div>
@@ -4097,6 +4278,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         {getLifecycleLabel(item.lifecycleStatus)}
                                       </div>
                                     )}
+                                    {minorTextOption === 'people' && getPeopleText(item) && (
+                                      <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                        {getPeopleText(item)}
+                                      </div>
+                                    )}
                                   </div>
                                 )
                               }
@@ -4142,6 +4328,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                     {minorTextOption === 'lifecycle' && (
                                       <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
                                         {getLifecycleLabel(item.lifecycleStatus)}
+                                      </div>
+                                    )}
+                                    {minorTextOption === 'people' && getPeopleText(item) && (
+                                      <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                        {getPeopleText(item)}
                                       </div>
                                     )}
                                   </div>

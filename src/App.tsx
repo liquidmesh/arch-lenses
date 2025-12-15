@@ -356,15 +356,16 @@ function App() {
       if (importOptions.theme && importData.theme) {
         // Validate and merge theme data
         const currentTheme = loadTheme()
+        const incomingTheme = (importData.theme as any) || {}
         const importedTheme: Theme = {
-          name: (importData.theme as any).name || currentTheme.name,
+          name: incomingTheme.name || currentTheme.name,
           colors: {
             ...currentTheme.colors,
-            ...(importData.theme as any).colors,
+            ...(incomingTheme.colors || {}),
           },
           fonts: {
             ...currentTheme.fonts,
-            ...(importData.theme as any).fonts,
+            ...(incomingTheme.fonts || {}),
           },
         }
         saveTheme(importedTheme)

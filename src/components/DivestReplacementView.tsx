@@ -2452,7 +2452,10 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                   <>
                                     {(columnViewMode === 'both' || columnViewMode === 'current') && (
                                       /* Middle Column: Current items from all roll-up groups */
-                                      <div className={columnViewMode === 'both' ? 'mr-6' : ''}>
+                                      <div 
+                                        style={(!thirdLens || thirdLensItems.length === 0) && columnViewMode === 'both' ? { gridColumn: '2' } : {}}
+                                        className={columnViewMode === 'both' && (thirdLens && thirdLensItems.length > 0) ? 'mr-6' : ''}
+                                      >
                                   {/* Roll-up Groups - Current Items */}
                                   <div className="space-y-3">
                                   {rollupGroups.map((group: any) => {
@@ -2767,7 +2770,10 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                     
                                     {(columnViewMode === 'both' || columnViewMode === 'target') && (
                                       /* Right Column: Target items from all roll-up groups */
-                                      <div className={columnViewMode === 'both' ? 'ml-6' : ''}>
+                                      <div 
+                                        style={(!thirdLens || thirdLensItems.length === 0) && columnViewMode === 'both' ? { gridColumn: '3' } : {}}
+                                        className={columnViewMode === 'both' && (thirdLens && thirdLensItems.length > 0) ? 'ml-6' : ''}
+                                      >
                                   {/* Roll-up Groups - Target Items */}
                                   <div className="space-y-3">
                                   {rollupGroups.map((group: any) => {
@@ -3209,14 +3215,31 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                     gap: '0.75rem',
                                   }
                                 }
-                                return {}
+                                // When no third lens, still use inline styles for consistency
+                                if (!hasAnyLifecycleStatus) {
+                                  return {
+                                    display: 'grid',
+                                    gridTemplateColumns: '200px 1fr',
+                                    rowGap: '0.75rem',
+                                    columnGap: '0.75rem',
+                                  }
+                                }
+                                if (columnViewMode === 'both') {
+                                  return {
+                                    display: 'grid',
+                                    gridTemplateColumns: '200px 1fr 1fr',
+                                    rowGap: '0.75rem',
+                                    columnGap: '1.25rem',
+                                  }
+                                }
+                                return {
+                                  display: 'grid',
+                                  gridTemplateColumns: '200px 1fr',
+                                  rowGap: '0.75rem',
+                                  columnGap: '0.75rem',
+                                }
                               })()}
-                              className={`${(() => {
-                                if (thirdLens && thirdLensItems.length > 0) return ''
-                                if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
-                                if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
-                                return 'grid-cols-[200px_1fr]'
-                              })()} gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
+                              className={`gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
                             >
                               {/* Left: Primary Item Name */}
                               <div className="flex flex-col justify-start">
@@ -3355,8 +3378,16 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           })}
                                         </div>
                                       ) : (
-                                        // Use nested grid when no third lens
-                                        <div className={`grid ${getGridColsClass()} gap-1`}>
+                                        // Use dynamic grid (up to 5 cols, stretch to fill) when no third lens
+                                        <div 
+                                          style={columnViewMode === 'both' ? { 
+                                            gridColumn: '2',
+                                            display: 'grid',
+                                            gridTemplateColumns: `repeat(${Math.max(1, Math.min(divestItems.length, 3))}, minmax(0, 1fr))`,
+                                            gap: '0.25rem'
+                                          } : {}}
+                                          className={columnViewMode === 'both' ? '' : `grid ${getGridColsClass()} gap-1`}
+                                        >
                                           {divestItems.map((item: ItemRecord) => {
                                             const isHighlighted = shouldHighlightItem(item)
                                             const highlightClass = isHighlighted ? getOutlineClasses() : ''
@@ -3381,7 +3412,10 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         </div>
                                       )
                                     ) : (
-                                      <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                      <div 
+                                        style={columnViewMode === 'both' ? { gridColumn: '2' } : {}}
+                                        className="text-xs text-slate-500 dark:text-slate-400 italic py-2"
+                                      >
                                         No Current items
                                       </div>
                                     )}
@@ -3505,8 +3539,16 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           })}
                                         </div>
                                       ) : (
-                                        // Use nested grid when no third lens
-                                        <div className={`grid ${getGridColsClass()} gap-1`}>
+                                        // Use dynamic grid (up to 5 cols, stretch to fill) when no third lens
+                                        <div 
+                                          style={columnViewMode === 'both' ? { 
+                                            gridColumn: '3',
+                                            display: 'grid',
+                                            gridTemplateColumns: `repeat(${Math.max(1, Math.min(targetItems.length, 3))}, minmax(0, 1fr))`,
+                                            gap: '0.25rem'
+                                          } : {}}
+                                          className={columnViewMode === 'both' ? '' : `grid ${getGridColsClass()} gap-1`}
+                                        >
                                           {targetItems.map((item: ItemRecord) => {
                                             const isHighlighted = shouldHighlightItem(item)
                                             const highlightClass = isHighlighted ? getOutlineClasses() : ''
@@ -3531,7 +3573,10 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         </div>
                                       )
                                     ) : (
-                                      <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                      <div 
+                                        style={columnViewMode === 'both' ? { gridColumn: '3' } : {}}
+                                        className="text-xs text-slate-500 dark:text-slate-400 italic py-2"
+                                      >
                                         No Target items
                                       </div>
                                     )}
@@ -3642,14 +3687,31 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                           gap: '0.75rem',
                         }
                       }
-                      return {}
+                      // When no third lens, use inline styles for consistency
+                      if (!hasAnyLifecycleStatus) {
+                        return {
+                          display: 'grid',
+                          gridTemplateColumns: '200px 1fr',
+                          rowGap: '0.75rem',
+                          columnGap: '0.75rem',
+                        }
+                      }
+                      if (columnViewMode === 'both') {
+                        return {
+                          display: 'grid',
+                          gridTemplateColumns: '200px 1fr 1fr',
+                          rowGap: '0.75rem',
+                          columnGap: '1.25rem',
+                        }
+                      }
+                      return {
+                        display: 'grid',
+                        gridTemplateColumns: '200px 1fr',
+                        rowGap: '0.75rem',
+                        columnGap: '0.75rem',
+                      }
                     })()}
-                    className={`${(() => {
-                      if (thirdLens && thirdLensItems.length > 0) return ''
-                      if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
-                      if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
-                      return 'grid-cols-[200px_1fr]'
-                    })()} gap-3 p-2`}
+                    className={`gap-3 p-2 ${itemAnalysis.length > 0 ? 'mt-3' : ''}`}
                   >
                     {/* Left: "Not Related" Label */}
                     <div className="flex flex-col justify-start">
@@ -3777,7 +3839,18 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                   })}
                               </div>
                             ) : (
-                              <div className={`grid ${getGridColsClass()} gap-1`}>
+                              <div 
+                                style={columnViewMode === 'both' ? { 
+                                  gridColumn: '2',
+                                  display: 'grid',
+                                  gridTemplateColumns: `repeat(${Math.max(1, Math.min(
+                                    unrelatedSecondaryItems.filter(item => item.lifecycleStatus === 'Divest' || item.lifecycleStatus === 'Stable' || !item.lifecycleStatus).length,
+                                    3
+                                  ))}, minmax(0, 1fr))`,
+                                  gap: '0.25rem'
+                                } : {}}
+                                className={columnViewMode === 'both' ? '' : `grid ${getGridColsClass()} gap-1`}
+                              >
                                 {unrelatedSecondaryItems
                                   .filter(item => {
                                     return item.lifecycleStatus === 'Divest' || 
@@ -3924,7 +3997,18 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                   })}
                               </div>
                             ) : (
-                              <div className={`grid ${getGridColsClass()} gap-1`}>
+                              <div 
+                                style={columnViewMode === 'both' ? { 
+                                  gridColumn: '3',
+                                  display: 'grid',
+                                  gridTemplateColumns: `repeat(${Math.max(1, Math.min(
+                                    unrelatedSecondaryItems.filter(item => item.lifecycleStatus !== 'Divest').length,
+                                    3
+                                  ))}, minmax(0, 1fr))`,
+                                  gap: '0.25rem'
+                                } : {}}
+                                className={columnViewMode === 'both' ? '' : `grid ${getGridColsClass()} gap-1`}
+                              >
                                 {unrelatedSecondaryItems
                                   .filter(item => {
                                     return item.lifecycleStatus !== 'Divest'

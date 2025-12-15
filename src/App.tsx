@@ -10,7 +10,7 @@ import { TeamModal } from './components/TeamModal'
 import { TeamManager } from './components/TeamManager'
 import { MeetingNotesModal } from './components/MeetingNotesModal'
 import { Settings } from './components/Settings'
-import { loadTheme, applyTheme } from './utils/theme'
+import { loadTheme, applyTheme, saveTheme, type Theme } from './utils/theme'
 import { TasksModal } from './components/TasksModal'
 import { DivestReplacementView } from './components/DivestReplacementView'
 import { invalidateLensesCache, getLensOrderSync } from './utils/lensOrder'
@@ -36,11 +36,15 @@ function App() {
     lenses: boolean
     people: boolean
     notes: boolean
+    customLenses: boolean
+    theme: boolean
   }>({
     all: true,
     lenses: false,
     people: false,
     notes: false,
+    customLenses: false,
+    theme: false,
   })
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -49,10 +53,14 @@ function App() {
     lenses: boolean
     people: boolean
     notes: boolean
+    customLenses: boolean
+    theme: boolean
   }>({
     lenses: false,
     people: false,
     notes: false,
+    customLenses: false,
+    theme: false,
   })
 
   async function reloadLenses() {
@@ -160,6 +168,8 @@ function App() {
       lenses: false,
       people: false,
       notes: false,
+      customLenses: false,
+      theme: false,
     })
     setExportDialogOpen(true)
   }
@@ -178,6 +188,9 @@ function App() {
       bundle.teamMembers = await db.teamMembers.toArray()
       bundle.meetingNotes = await db.meetingNotes.toArray()
       bundle.tasks = await db.tasks.toArray()
+      bundle.lenses = await db.lenses.toArray()
+      const theme = loadTheme()
+      bundle.theme = theme
     } else {
       if (exportOptions.lenses) {
         bundle.items = await db.items.toArray()
@@ -189,6 +202,13 @@ function App() {
       if (exportOptions.notes) {
         bundle.meetingNotes = await db.meetingNotes.toArray()
         bundle.tasks = await db.tasks.toArray()
+      }
+      if (exportOptions.customLenses) {
+        bundle.lenses = await db.lenses.toArray()
+      }
+      if (exportOptions.theme) {
+        const theme = loadTheme()
+        bundle.theme = theme
       }
     }
 
@@ -216,11 +236,15 @@ function App() {
       const hasLenses = !!(data.items && data.items.length > 0)
       const hasPeople = !!(data.teamMembers && data.teamMembers.length > 0)
       const hasNotes = !!((data.meetingNotes && data.meetingNotes.length > 0) || (data.tasks && data.tasks.length > 0))
+      const hasCustomLenses = !!(data.lenses && data.lenses.length > 0)
+      const hasTheme = !!data.theme
       
       setImportOptions({
         lenses: hasLenses,
         people: hasPeople,
         notes: hasNotes,
+        customLenses: hasCustomLenses,
+        theme: hasTheme,
       })
       
       setImportDialogOpen(true)
@@ -240,6 +264,8 @@ function App() {
     if (importOptions.lenses) selectedTypes.push('Lenses (items and relationships)')
     if (importOptions.people) selectedTypes.push('People (team members)')
     if (importOptions.notes) selectedTypes.push('Notes (meeting notes and tasks)')
+    if (importOptions.customLenses) selectedTypes.push('Custom Architecture Lenses')
+    if (importOptions.theme) selectedTypes.push('Theme Settings')
     
     if (selectedTypes.length === 0) {
       alert('Please select at least one data type to import.')
@@ -264,8 +290,11 @@ function App() {
       if (importOptions.notes) {
         tablesToClear.push('meetingNotes', 'tasks')
       }
+      if (importOptions.customLenses) {
+        tablesToClear.push('lenses')
+      }
       
-      await db.transaction('rw', [db.items, db.relationships, db.teamMembers, db.meetingNotes, db.tasks], async () => {
+      await db.transaction('rw', [db.items, db.relationships, db.teamMembers, db.meetingNotes, db.tasks, db.lenses], async () => {
         // Clear only selected tables
         if (importOptions.lenses) {
           await db.items.clear()
@@ -277,6 +306,9 @@ function App() {
         if (importOptions.notes) {
           await db.meetingNotes.clear()
           await db.tasks.clear()
+        }
+        if (importOptions.customLenses) {
+          await db.lenses.clear()
         }
         
         // Import only selected data
@@ -297,13 +329,53 @@ function App() {
             await db.tasks.bulkAdd(importData.tasks)
           }
         }
+        if (importOptions.customLenses && importData.lenses) {
+          // Remove id fields to avoid conflicts when adding
+          const lensesToImport = importData.lenses.map(lens => {
+            const { id, ...lensWithoutId } = lens
+            return lensWithoutId
+          })
+          // Add all lenses (table was already cleared above)
+          try {
+            await db.lenses.bulkAdd(lensesToImport)
+          } catch (error) {
+            // If bulkAdd fails, try adding one by one to see which ones fail
+            console.warn('bulkAdd failed, trying individual adds:', error)
+            for (const lens of lensesToImport) {
+              try {
+                await db.lenses.add(lens)
+              } catch (err) {
+                console.error(`Failed to import lens ${lens.key}:`, err)
+              }
+            }
+          }
+        }
       })
+      
+      // Import theme if selected
+      if (importOptions.theme && importData.theme) {
+        // Validate and merge theme data
+        const currentTheme = loadTheme()
+        const importedTheme: Theme = {
+          name: (importData.theme as any).name || currentTheme.name,
+          colors: {
+            ...currentTheme.colors,
+            ...(importData.theme as any).colors,
+          },
+          fonts: {
+            ...currentTheme.fonts,
+            ...(importData.theme as any).fonts,
+          },
+        }
+        saveTheme(importedTheme)
+        applyTheme(importedTheme)
+      }
       
       alert('Import complete')
       setImportDialogOpen(false)
       setImportFile(null)
       setImportData(null)
-      setImportOptions({ lenses: false, people: false, notes: false })
+      setImportOptions({ lenses: false, people: false, notes: false, customLenses: false, theme: false })
       
       // Refresh views
       setTeamModalRefreshKey(k => k + 1)
@@ -491,6 +563,8 @@ function App() {
                 lenses: false,
                 people: false,
                 notes: false,
+                customLenses: false,
+                theme: false,
               })}
             />
             <span>All</span>
@@ -505,6 +579,8 @@ function App() {
                 lenses: true,
                 people: false,
                 notes: false,
+                customLenses: false,
+                theme: false,
               })}
             />
             <span>Lenses (items and relationships)</span>
@@ -519,6 +595,8 @@ function App() {
                 lenses: false,
                 people: true,
                 notes: false,
+                customLenses: false,
+                theme: false,
               })}
             />
             <span>People (team members)</span>
@@ -533,10 +611,33 @@ function App() {
                 lenses: false,
                 people: false,
                 notes: true,
+                customLenses: false,
+                theme: false,
               })}
             />
             <span>Notes (meeting notes and tasks)</span>
           </label>
+          <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Additional options (when not exporting all):</p>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={exportOptions.customLenses}
+                disabled={exportOptions.all}
+                onChange={e => setExportOptions(prev => ({ ...prev, customLenses: e.target.checked }))}
+              />
+              <span>Custom Architecture Lenses</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={exportOptions.theme}
+                disabled={exportOptions.all}
+                onChange={e => setExportOptions(prev => ({ ...prev, theme: e.target.checked }))}
+              />
+              <span>Theme Settings</span>
+            </label>
+          </div>
         </div>
       </Modal>
       <Modal
@@ -545,7 +646,7 @@ function App() {
           setImportDialogOpen(false)
           setImportFile(null)
           setImportData(null)
-          setImportOptions({ lenses: false, people: false, notes: false })
+          setImportOptions({ lenses: false, people: false, notes: false, customLenses: false, theme: false })
         }}
         title="Import Data"
         footer={
@@ -556,7 +657,7 @@ function App() {
                 setImportDialogOpen(false)
                 setImportFile(null)
                 setImportData(null)
-                setImportOptions({ lenses: false, people: false, notes: false })
+                setImportOptions({ lenses: false, people: false, notes: false, customLenses: false, theme: false })
               }}
             >
               Cancel
@@ -584,6 +685,12 @@ function App() {
                   )}
                   {((importData.meetingNotes && importData.meetingNotes.length > 0) || (importData.tasks && importData.tasks.length > 0)) && (
                     <p>• {importData.meetingNotes?.length || 0} meeting notes, {importData.tasks?.length || 0} tasks</p>
+                  )}
+                  {importData.lenses && importData.lenses.length > 0 && (
+                    <p>• {importData.lenses.length} custom architecture lenses</p>
+                  )}
+                  {importData.theme && (
+                    <p>• Theme settings</p>
                   )}
                 </div>
               )}
@@ -624,6 +731,26 @@ function App() {
                       onChange={e => setImportOptions(prev => ({ ...prev, notes: e.target.checked }))}
                     />
                     <span>Notes (meeting notes and tasks) - {importData.meetingNotes?.length || 0} notes, {importData.tasks?.length || 0} tasks</span>
+                  </label>
+                )}
+                {importData.lenses && importData.lenses.length > 0 && (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={importOptions.customLenses}
+                      onChange={e => setImportOptions(prev => ({ ...prev, customLenses: e.target.checked }))}
+                    />
+                    <span>Custom Architecture Lenses - {importData.lenses.length} lenses</span>
+                  </label>
+                )}
+                {importData.theme && (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={importOptions.theme}
+                      onChange={e => setImportOptions(prev => ({ ...prev, theme: e.target.checked }))}
+                    />
+                    <span>Theme Settings</span>
                   </label>
                 )}
               </>

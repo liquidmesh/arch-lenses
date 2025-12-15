@@ -173,6 +173,8 @@ export type ExportBundle = {
   teamMembers?: TeamMember[];
   meetingNotes?: MeetingNote[];
   tasks?: Task[];
+  lenses?: LensDefinition[];
+  theme?: any; // Theme from utils/theme.ts - using any to avoid circular dependency
 };
 
 export function hasGap(item: ItemRecord): boolean {

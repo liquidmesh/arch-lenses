@@ -655,6 +655,46 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     return map
   }, [thirdLens, thirdLensItems, secondaryLens, items, relationships])
 
+  // Map of secondary item ID to map of third lens item ID to relationship lifecycle status
+  // This allows us to check relationship lifecycle per third lens item
+  const secondaryToThirdLensLifecycleMap = useMemo(() => {
+    if (!thirdLens || thirdLensItems.length === 0) return new Map<number, Map<number, RelationshipLifecycleStatus | undefined>>()
+    
+    const map = new Map<number, Map<number, RelationshipLifecycleStatus | undefined>>()
+    const thirdLensItemIds = new Set(thirdLensItems.map(item => item.id!).filter((id): id is number => id !== undefined))
+    
+    // For each secondary item, find relationships to third lens items with their lifecycle status
+    items
+      .filter(item => item.lens === secondaryLens && item.id !== undefined)
+      .forEach(secondaryItem => {
+        const thirdLensLifecycleMap = new Map<number, RelationshipLifecycleStatus | undefined>()
+        
+        relationships.forEach(rel => {
+          let thirdLensItemId: number | null = null
+          let secondaryItemId: number | null = null
+          
+          // Check if this relationship connects secondaryItem to a third lens item
+          if (rel.fromItemId === secondaryItem.id && thirdLensItemIds.has(rel.toItemId)) {
+            thirdLensItemId = rel.toItemId
+            secondaryItemId = rel.fromItemId
+          } else if (rel.toItemId === secondaryItem.id && thirdLensItemIds.has(rel.fromItemId)) {
+            thirdLensItemId = rel.fromItemId
+            secondaryItemId = rel.toItemId
+          }
+          
+          if (thirdLensItemId !== null && secondaryItemId !== null) {
+            thirdLensLifecycleMap.set(thirdLensItemId, rel.lifecycleStatus)
+          }
+        })
+        
+        if (thirdLensLifecycleMap.size > 0) {
+          map.set(secondaryItem.id!, thirdLensLifecycleMap)
+        }
+      })
+    
+    return map
+  }, [thirdLens, thirdLensItems, secondaryLens, items, relationships])
+
   // Get color for inner boxes using theme colors
   // Color groups: (Error, Divest), (Success, Invest), (Info, Plan), (Primary, Default), (Warning, Emerging)
   const getInnerBoxColor = (status?: LifecycleStatus): React.CSSProperties => {
@@ -2009,6 +2049,31 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     return secondaryToThirdLensMap.get(secondaryItemId) || new Set<number>()
   }
 
+  // Get relationships for a secondary item to third lens items, filtered by column (Current or Target)
+  // Current: excludes relationships with "Planned to add" lifecycle
+  // Target: excludes relationships with "Planned to remove" lifecycle
+  const getThirdLensRelationshipsForColumn = (secondaryItemId: number, column: 'current' | 'target'): Set<number> => {
+    const lifecycleMap = secondaryToThirdLensLifecycleMap.get(secondaryItemId)
+    if (!lifecycleMap) return new Set<number>()
+    
+    const filteredIds = new Set<number>()
+    lifecycleMap.forEach((lifecycleStatus, thirdLensItemId) => {
+      if (column === 'current') {
+        // Current: exclude "Planned to add"
+        if (lifecycleStatus !== 'Planned to add') {
+          filteredIds.add(thirdLensItemId)
+        }
+      } else {
+        // Target: exclude "Planned to remove"
+        if (lifecycleStatus !== 'Planned to remove') {
+          filteredIds.add(thirdLensItemId)
+        }
+      }
+    })
+    
+    return filteredIds
+  }
+
   // Render a single item with third lens support
   const renderItemWithThirdLens = (
     item: ItemRecord,
@@ -2016,7 +2081,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     highlightClass: string,
     onMouseEnter: () => void,
     onMouseLeave: () => void,
-    onClick: () => void
+    onClick: () => void,
+    column?: 'current' | 'target' // Optional: filter by column (Current excludes "Planned to add", Target excludes "Planned to remove")
   ) => {
     if (!thirdLens || thirdLensItems.length === 0 || !item.id) {
       // No third lens - render normally
@@ -2056,7 +2122,10 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       )
     }
 
-    const relatedThirdLensIds = getThirdLensRelationships(item.id)
+    // Use column-filtered relationships if column is specified, otherwise use all relationships
+    const relatedThirdLensIds = column 
+      ? getThirdLensRelationshipsForColumn(item.id, column)
+      : getThirdLensRelationships(item.id)
     const allThirdLensIds = new Set(thirdLensItems.map(i => i.id!).filter((id): id is number => id !== undefined))
     
     // If not related to any or related to all, span all columns
@@ -2903,7 +2972,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                               () => {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
-                                              }
+                                              },
+                                              'current' // Current column
                                             )
                                           })}
                                         </div>
@@ -3208,7 +3278,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                               () => {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
-                                              }
+                                              },
+                                              'target' // Target column
                                             )
                                           })}
                                         </div>
@@ -3442,7 +3513,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           {divestItems.map((item: ItemRecord, itemRowIdx: number) => {
                                             const isHighlighted = shouldHighlightItem(item)
                                             const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                            const relatedThirdLensIds = item.id ? getThirdLensRelationships(item.id) : new Set<number>()
+                                            // For Current column: exclude relationships with "Planned to add"
+                                            const relatedThirdLensIds = item.id ? getThirdLensRelationshipsForColumn(item.id, 'current') : new Set<number>()
                                             const allThirdLensIds = new Set(thirdLensItems.map(i => i.id!).filter((id): id is number => id !== undefined))
                                             
                                             // If not related to any or related to all, span all columns
@@ -3577,7 +3649,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                               () => {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
-                                              }
+                                              },
+                                              'current' // Filter for Current column
                                             )
                                           })}
                                         </div>
@@ -3613,7 +3686,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           {targetItems.map((item: ItemRecord, itemRowIdx: number) => {
                                             const isHighlighted = shouldHighlightItem(item)
                                             const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                            const relatedThirdLensIds = item.id ? getThirdLensRelationships(item.id) : new Set<number>()
+                                            // For Target column: exclude relationships with "Planned to remove"
+                                            const relatedThirdLensIds = item.id ? getThirdLensRelationshipsForColumn(item.id, 'target') : new Set<number>()
                                             const allThirdLensIds = new Set(thirdLensItems.map(i => i.id!).filter((id): id is number => id !== undefined))
                                             
                                             // If not related to any or related to all, span all columns
@@ -3748,7 +3822,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                               () => {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
-                                              }
+                                              },
+                                              'target' // Target column
                                             )
                                           })}
                                         </div>
@@ -3925,7 +4000,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                   .map((item: ItemRecord, itemRowIdx: number) => {
                                     const isHighlighted = shouldHighlightItem(item)
                                     const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                    const relatedThirdLensIds = item.id ? getThirdLensRelationships(item.id) : new Set<number>()
+                                    // For Current column: exclude relationships with "Planned to add"
+                                    const relatedThirdLensIds = item.id ? getThirdLensRelationshipsForColumn(item.id, 'current') : new Set<number>()
                                     const allThirdLensIds = new Set(thirdLensItems.map(i => i.id!).filter((id): id is number => id !== undefined))
                                     
                                     if (relatedThirdLensIds.size === 0 || relatedThirdLensIds.size === allThirdLensIds.size) {
@@ -4056,7 +4132,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       () => {
                                         setEditItem(item)
                                         setEditDialogOpen(true)
-                                      }
+                                      },
+                                      'current' // Current column
                                     )
                                   })}
                               </div>
@@ -4083,7 +4160,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                   .map((item: ItemRecord, itemRowIdx: number) => {
                                     const isHighlighted = shouldHighlightItem(item)
                                     const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                    const relatedThirdLensIds = item.id ? getThirdLensRelationships(item.id) : new Set<number>()
+                                    // For Target column: exclude relationships with "Planned to remove"
+                                    const relatedThirdLensIds = item.id ? getThirdLensRelationshipsForColumn(item.id, 'target') : new Set<number>()
                                     const allThirdLensIds = new Set(thirdLensItems.map(i => i.id!).filter((id): id is number => id !== undefined))
                                     
                                     if (relatedThirdLensIds.size === 0 || relatedThirdLensIds.size === allThirdLensIds.size) {
@@ -4212,7 +4290,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                       () => {
                                         setEditItem(item)
                                         setEditDialogOpen(true)
-                                      }
+                                      },
+                                      'target' // Target column
                                     )
                                   })}
                               </div>

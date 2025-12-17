@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { db, getAllLenses } from '../db'
-import { type ItemRecord, type RelationshipRecord, type LensKey, type LifecycleStatus, type RelationshipLifecycleStatus, LENSES } from '../types'
+import { type ItemRecord, type RelationshipRecord, type LensKey, type LifecycleStatus, type RelationshipLifecycleStatus, LENSES, getRelationshipSides } from '../types'
 import { ItemDialog } from './ItemDialog'
 import { loadTheme, type Theme } from '../utils/theme'
 
@@ -42,9 +42,9 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     return saved ? parseInt(saved, 10) : null
   })
   const [filterItemQuery, setFilterItemQuery] = useState('')
-  const [minorTextOption, setMinorTextOption] = useState<'none' | 'lifecycle' | 'description' | 'people'>(() => {
+  const [minorTextOption, setMinorTextOption] = useState<'none' | 'lifecycle' | 'description' | 'people' | 'relationships'>(() => {
     const saved = localStorage.getItem('divest-replacement-minor-text')
-    return (saved === 'none' || saved === 'lifecycle' || saved === 'description' || saved === 'people') ? saved : 'lifecycle'
+    return (saved === 'none' || saved === 'lifecycle' || saved === 'description' || saved === 'people' || saved === 'relationships') ? saved : 'lifecycle'
   })
   const [rollupLens, setRollupLens] = useState<LensKey | '' | '__parent__'>(() => {
     const saved = localStorage.getItem('divest-replacement-rollup-lens')
@@ -776,6 +776,56 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     return people.join(', ') || ''
   }
 
+  // Helper function to get relationship text for a secondary item with a primary item
+  const getRelationshipText = (secondaryItem: ItemRecord, primaryItemId: number | undefined): string => {
+    if (!secondaryItem.id || !primaryItemId) return ''
+    
+    // Find relationships between the secondary item and primary item
+    const rels = relationships.filter(rel => {
+      return (
+        (rel.fromItemId === secondaryItem.id && rel.toItemId === primaryItemId) ||
+        (rel.toItemId === secondaryItem.id && rel.fromItemId === primaryItemId)
+      )
+    })
+    
+    if (rels.length === 0) return ''
+    
+    // Format each relationship: side label (note) [lifecycle] with deduping and skipping Default with no note
+    const relTexts = rels.map(rel => {
+      const type = rel.relationshipType || 'Default'
+      const note = rel.note || ''
+      const lifecycle =
+        rel.lifecycleStatus && rel.lifecycleStatus !== 'Existing'
+          ? ` – ${rel.lifecycleStatus}`
+          : ''
+
+      // Determine which side of the relationship the secondary item is on
+      let sideLabel: string
+      if (rel.fromItemId === secondaryItem.id) {
+        // Secondary item is on the "from" side
+        sideLabel = rel.fromItemIdRelationshipType || getRelationshipSides(type).from
+      } else {
+        // Secondary item is on the "to" side
+        sideLabel = rel.toItemIdRelationshipType || getRelationshipSides(type).to
+      }
+
+      // If side label is Default and there's no note, skip showing it
+      if (sideLabel === 'Default' && !note) return ''
+
+      // If side label is Default but note exists, just show the note
+      if (sideLabel === 'Default') return `${note}${lifecycle}`
+
+      // Otherwise show side label with optional note
+      const base = note ? `${sideLabel} (${note})` : sideLabel
+      return `${base}${lifecycle}`
+    }).filter(text => text)
+
+    // Deduplicate identical entries
+    const uniqueTexts = Array.from(new Set(relTexts))
+    
+    return uniqueTexts.join('; ')
+  }
+
   const getLifecycleLabel = (status?: LifecycleStatus): string => {
     return status || 'No Status'
   }
@@ -1181,6 +1231,18 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                     minor.textContent = line
                     svg.appendChild(minor)
                   })
+                } else if (minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(group.rollupItem, primaryItem.id)) {
+                  const relText = getRelationshipText(group.rollupItem, primaryItem.id)
+                  const relLines = wrapText(relText, boxWidth - 8, 8)
+                  relLines.forEach((line, idx) => {
+                    const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                    minor.setAttribute('x', String(boxX + boxWidth / 2))
+                    minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                    minor.setAttribute('class', 'item-minor')
+                    minor.setAttribute('text-anchor', 'middle')
+                    minor.textContent = line
+                    svg.appendChild(minor)
+                  })
                 }
               }
               
@@ -1357,6 +1419,18 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 const peopleText = getPeopleText(item)
                 const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
                 peopleLines.forEach((line, idx) => {
+                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                  minor.setAttribute('x', String(boxX + boxWidth / 2))
+                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                  minor.setAttribute('class', 'item-minor')
+                  minor.setAttribute('text-anchor', 'middle')
+                  minor.textContent = line
+                  svg.appendChild(minor)
+                })
+              } else if (minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id)) {
+                const relText = getRelationshipText(item, primaryItem.id)
+                const relLines = wrapText(relText, boxWidth - 8, 8)
+                relLines.forEach((line, idx) => {
                   const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
                   minor.setAttribute('x', String(boxX + boxWidth / 2))
                   minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
@@ -1632,6 +1706,30 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               minor.textContent = line
               svg.appendChild(minor)
             })
+          } else if (minorTextOption === 'people' && getPeopleText(item)) {
+            const peopleText = getPeopleText(item)
+            const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
+            peopleLines.forEach((line, idx) => {
+              const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+              minor.setAttribute('x', String(boxX + boxWidth / 2))
+              minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+              minor.setAttribute('class', 'item-minor')
+              minor.setAttribute('text-anchor', 'middle')
+              minor.textContent = line
+              svg.appendChild(minor)
+            })
+          } else if (minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id)) {
+            const relText = getRelationshipText(item, primaryItem.id)
+            const relLines = wrapText(relText, boxWidth - 8, 8)
+            relLines.forEach((line, idx) => {
+              const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+              minor.setAttribute('x', String(boxX + boxWidth / 2))
+              minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+              minor.setAttribute('class', 'item-minor')
+              minor.setAttribute('text-anchor', 'middle')
+              minor.textContent = line
+              svg.appendChild(minor)
+            })
           }
         })
         }
@@ -1814,6 +1912,29 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               minor.setAttribute('text-anchor', 'middle')
               minor.textContent = getLifecycleLabel(item.lifecycleStatus)
               svg.appendChild(minor)
+            } else if (minorTextOption === 'description' && item.description) {
+              const descLines = wrapText(item.description, boxWidth - 8, 8)
+              descLines.forEach((line, idx) => {
+                const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                minor.setAttribute('x', String(boxX + boxWidth / 2))
+                minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                minor.setAttribute('class', 'item-minor')
+                minor.setAttribute('text-anchor', 'middle')
+                minor.textContent = line
+                svg.appendChild(minor)
+              })
+            } else if (minorTextOption === 'people' && getPeopleText(item)) {
+              const peopleText = getPeopleText(item)
+              const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
+              peopleLines.forEach((line, idx) => {
+                const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                minor.setAttribute('x', String(boxX + boxWidth / 2))
+                minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                minor.setAttribute('class', 'item-minor')
+                minor.setAttribute('text-anchor', 'middle')
+                minor.textContent = line
+                svg.appendChild(minor)
+              })
             }
           })
         }
@@ -1863,6 +1984,29 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               minor.setAttribute('text-anchor', 'middle')
               minor.textContent = getLifecycleLabel(item.lifecycleStatus)
               svg.appendChild(minor)
+            } else if (minorTextOption === 'description' && item.description) {
+              const descLines = wrapText(item.description, boxWidth - 8, 8)
+              descLines.forEach((line, idx) => {
+                const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                minor.setAttribute('x', String(boxX + boxWidth / 2))
+                minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                minor.setAttribute('class', 'item-minor')
+                minor.setAttribute('text-anchor', 'middle')
+                minor.textContent = line
+                svg.appendChild(minor)
+              })
+            } else if (minorTextOption === 'people' && getPeopleText(item)) {
+              const peopleText = getPeopleText(item)
+              const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
+              peopleLines.forEach((line, idx) => {
+                const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                minor.setAttribute('x', String(boxX + boxWidth / 2))
+                minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                minor.setAttribute('class', 'item-minor')
+                minor.setAttribute('text-anchor', 'middle')
+                minor.textContent = line
+                svg.appendChild(minor)
+              })
             }
           })
         }
@@ -2082,7 +2226,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     onMouseEnter: () => void,
     onMouseLeave: () => void,
     onClick: () => void,
-    column?: 'current' | 'target' // Optional: filter by column (Current excludes "Planned to add", Target excludes "Planned to remove")
+    column?: 'current' | 'target', // Optional: filter by column (Current excludes "Planned to add", Target excludes "Planned to remove")
+    primaryItemId?: number // Optional: primary item ID for relationship display
   ) => {
     if (!thirdLens || thirdLensItems.length === 0 || !item.id) {
       // No third lens - render normally
@@ -2116,6 +2261,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           {minorTextOption === 'people' && getPeopleText(item) && (
             <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
               {getPeopleText(item)}
+            </div>
+          )}
+          {minorTextOption === 'relationships' && primaryItemId && getRelationshipText(item, primaryItemId) && (
+            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+              {getRelationshipText(item, primaryItemId)}
             </div>
           )}
         </div>
@@ -2204,6 +2354,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           {minorTextOption === 'people' && getPeopleText(item) && (
             <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
               {getPeopleText(item)}
+            </div>
+          )}
+          {minorTextOption === 'relationships' && primaryItemId && getRelationshipText(item, primaryItemId) && (
+            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+              {getRelationshipText(item, primaryItemId)}
             </div>
           )}
         </div>
@@ -2368,13 +2523,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 <span className="text-xs whitespace-nowrap">Minor:</span>
                 <select
                   value={minorTextOption}
-                  onChange={e => setMinorTextOption(e.target.value as 'none' | 'lifecycle' | 'description' | 'people')}
+                  onChange={e => setMinorTextOption(e.target.value as 'none' | 'lifecycle' | 'description' | 'people' | 'relationships')}
                   className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 min-w-0"
                 >
                   <option value="none">None</option>
                   <option value="lifecycle">Status</option>
                   <option value="description">Desc</option>
                   <option value="people">People</option>
+                  <option value="relationships">Relationships</option>
                 </select>
               </label>
               {primaryLens && secondaryLens && unrelatedSecondaryItems.length > 0 && (
@@ -2739,6 +2895,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                   {getPeopleText(group.rollupItem)}
                                                 </div>
                                               )}
+                                              {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(group.rollupItem, primaryItem.id) && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {getRelationshipText(group.rollupItem, primaryItem.id)}
+                                                </div>
+                                              )}
                                             </div>
                                           </div>
                                         ) : null}
@@ -2973,7 +3134,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
                                               },
-                                              'current' // Current column
+                                              'current', // Current column
+                                              primaryItem.id // Pass primary item ID for relationships
                                             )
                                           })}
                                         </div>
@@ -3279,7 +3441,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
                                               },
-                                              'target' // Target column
+                                              'target', // Target column
+                                              primaryItem.id // Pass primary item ID for relationships
                                             )
                                           })}
                                         </div>
@@ -3562,6 +3725,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getPeopleText(item)}
                                                     </div>
                                                   )}
+                                                  {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id) && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {getRelationshipText(item, primaryItem.id)}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )
                                             }
@@ -3615,6 +3783,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getPeopleText(item)}
                                                     </div>
                                                   )}
+                                                  {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id) && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {getRelationshipText(item, primaryItem.id)}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )
                                             })
@@ -3650,7 +3823,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
                                               },
-                                              'current' // Filter for Current column
+                                              'current', // Filter for Current column
+                                              primaryItem.id // Pass primary item ID for relationships
                                             )
                                           })}
                                         </div>
@@ -3735,6 +3909,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getPeopleText(item)}
                                                     </div>
                                                   )}
+                                                  {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id) && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {getRelationshipText(item, primaryItem.id)}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )
                                             }
@@ -3788,6 +3967,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getPeopleText(item)}
                                                     </div>
                                                   )}
+                                                  {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id) && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {getRelationshipText(item, primaryItem.id)}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )
                                             })
@@ -3823,7 +4007,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
                                               },
-                                              'target' // Target column
+                                              'target', // Target column
+                                              primaryItem.id // Pass primary item ID for relationships
                                             )
                                           })}
                                         </div>
@@ -3873,7 +4058,9 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                             () => {
                                               setEditItem(item)
                                               setEditDialogOpen(true)
-                                            }
+                                            },
+                                            undefined, // No column filter for single column mode
+                                            primaryItem.id // Pass primary item ID for relationships
                                           )
                                         })}
                                       </div>
@@ -3897,7 +4084,9 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                             () => {
                                               setEditItem(item)
                                               setEditDialogOpen(true)
-                                            }
+                                            },
+                                            undefined, // No column filter for single column mode
+                                            primaryItem.id // Pass primary item ID for relationships
                                           )
                                         })}
                                       </div>
@@ -4134,6 +4323,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         setEditDialogOpen(true)
                                       },
                                       'current' // Current column
+                                      // Note: unrelated items are not associated with a specific primary item, so relationships cannot be shown
                                     )
                                   })}
                               </div>

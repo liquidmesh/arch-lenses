@@ -42,9 +42,9 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     return saved ? parseInt(saved, 10) : null
   })
   const [filterItemQuery, setFilterItemQuery] = useState('')
-  const [minorTextOption, setMinorTextOption] = useState<'none' | 'lifecycle' | 'description' | 'people' | 'relationships'>(() => {
+  const [minorTextOption, setMinorTextOption] = useState<'none' | 'lifecycle' | 'description' | 'people' | 'relationships' | 'skillsGaps'>(() => {
     const saved = localStorage.getItem('divest-replacement-minor-text')
-    return (saved === 'none' || saved === 'lifecycle' || saved === 'description' || saved === 'people' || saved === 'relationships') ? saved : 'lifecycle'
+    return (saved === 'none' || saved === 'lifecycle' || saved === 'description' || saved === 'people' || saved === 'relationships' || saved === 'skillsGaps') ? saved : 'lifecycle'
   })
   const [rollupLens, setRollupLens] = useState<LensKey | '' | '__parent__'>(() => {
     const saved = localStorage.getItem('divest-replacement-rollup-lens')
@@ -1243,6 +1243,18 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                     minor.textContent = line
                     svg.appendChild(minor)
                   })
+                } else if (minorTextOption === 'skillsGaps' && group.rollupItem.skillsGaps) {
+                  const skillsGapsText = group.rollupItem.skillsGaps
+                  const skillsGapsLines = wrapText(skillsGapsText, boxWidth - 8, 8)
+                  skillsGapsLines.forEach((line, idx) => {
+                    const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                    minor.setAttribute('x', String(boxX + boxWidth / 2))
+                    minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                    minor.setAttribute('class', 'item-minor')
+                    minor.setAttribute('text-anchor', 'middle')
+                    minor.textContent = line
+                    svg.appendChild(minor)
+                  })
                 }
               }
               
@@ -1431,6 +1443,18 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 const relText = getRelationshipText(item, primaryItem.id)
                 const relLines = wrapText(relText, boxWidth - 8, 8)
                 relLines.forEach((line, idx) => {
+                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+                  minor.setAttribute('x', String(boxX + boxWidth / 2))
+                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
+                  minor.setAttribute('class', 'item-minor')
+                  minor.setAttribute('text-anchor', 'middle')
+                  minor.textContent = line
+                  svg.appendChild(minor)
+                })
+              } else if (minorTextOption === 'skillsGaps' && item.skillsGaps) {
+                const skillsGapsText = item.skillsGaps
+                const skillsGapsLines = wrapText(skillsGapsText, boxWidth - 8, 8)
+                skillsGapsLines.forEach((line, idx) => {
                   const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
                   minor.setAttribute('x', String(boxX + boxWidth / 2))
                   minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
@@ -2268,6 +2292,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               {getRelationshipText(item, primaryItemId)}
             </div>
           )}
+          {minorTextOption === 'skillsGaps' && item.skillsGaps && (
+            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+              {item.skillsGaps}
+            </div>
+          )}
         </div>
       )
     }
@@ -2359,6 +2388,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           {minorTextOption === 'relationships' && primaryItemId && getRelationshipText(item, primaryItemId) && (
             <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
               {getRelationshipText(item, primaryItemId)}
+            </div>
+          )}
+          {minorTextOption === 'skillsGaps' && item.skillsGaps && (
+            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+              {item.skillsGaps}
             </div>
           )}
         </div>
@@ -2523,7 +2557,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 <span className="text-xs whitespace-nowrap">Minor:</span>
                 <select
                   value={minorTextOption}
-                  onChange={e => setMinorTextOption(e.target.value as 'none' | 'lifecycle' | 'description' | 'people' | 'relationships')}
+                  onChange={e => setMinorTextOption(e.target.value as 'none' | 'lifecycle' | 'description' | 'people' | 'relationships' | 'skillsGaps')}
                   className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 min-w-0"
                 >
                   <option value="none">None</option>
@@ -2531,6 +2565,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                   <option value="description">Desc</option>
                   <option value="people">People</option>
                   <option value="relationships">Relationships</option>
+                  <option value="skillsGaps">Skills Gaps</option>
                 </select>
               </label>
               {primaryLens && secondaryLens && unrelatedSecondaryItems.length > 0 && (
@@ -2900,6 +2935,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                   {getRelationshipText(group.rollupItem, primaryItem.id)}
                                                 </div>
                                               )}
+                                              {minorTextOption === 'skillsGaps' && group.rollupItem.skillsGaps && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {group.rollupItem.skillsGaps}
+                                                </div>
+                                              )}
                                             </div>
                                           </div>
                                         ) : null}
@@ -3057,6 +3097,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                               {minorTextOption === 'people' && getPeopleText(group.rollupItem) && (
                                                 <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
                                                   {getPeopleText(group.rollupItem)}
+                                                </div>
+                                              )}
+                                              {minorTextOption === 'skillsGaps' && group.rollupItem.skillsGaps && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {group.rollupItem.skillsGaps}
                                                 </div>
                                               )}
                                             </div>
@@ -3356,6 +3401,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                               {minorTextOption === 'people' && getPeopleText(group.rollupItem) && (
                                                 <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
                                                   {getPeopleText(group.rollupItem)}
+                                                </div>
+                                              )}
+                                              {minorTextOption === 'skillsGaps' && group.rollupItem.skillsGaps && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {group.rollupItem.skillsGaps}
                                                 </div>
                                               )}
                                             </div>
@@ -3730,6 +3780,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getRelationshipText(item, primaryItem.id)}
                                                     </div>
                                                   )}
+                                                  {minorTextOption === 'skillsGaps' && item.skillsGaps && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {item.skillsGaps}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )
                                             }
@@ -3786,6 +3841,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                   {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id) && (
                                                     <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
                                                       {getRelationshipText(item, primaryItem.id)}
+                                                    </div>
+                                                  )}
+                                                  {minorTextOption === 'skillsGaps' && item.skillsGaps && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {item.skillsGaps}
                                                     </div>
                                                   )}
                                                 </div>
@@ -3914,6 +3974,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getRelationshipText(item, primaryItem.id)}
                                                     </div>
                                                   )}
+                                                  {minorTextOption === 'skillsGaps' && item.skillsGaps && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {item.skillsGaps}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )
                                             }
@@ -3970,6 +4035,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                   {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id) && (
                                                     <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
                                                       {getRelationshipText(item, primaryItem.id)}
+                                                    </div>
+                                                  )}
+                                                  {minorTextOption === 'skillsGaps' && item.skillsGaps && (
+                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                      {item.skillsGaps}
                                                     </div>
                                                   )}
                                                 </div>

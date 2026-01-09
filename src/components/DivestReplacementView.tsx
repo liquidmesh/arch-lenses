@@ -726,12 +726,16 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     const rowGap = 10
     const boxHeight = 40
     const boxWidth = 120
-    const boxesPerRow = 3
     const boxGap = 4
-
+    
     // Determine which columns to show based on columnViewMode
     const showCurrent = columnViewMode === 'both' || columnViewMode === 'current'
     const showTarget = columnViewMode === 'both' || columnViewMode === 'target'
+    
+    // Calculate boxesPerRow dynamically to match live view
+    // In single column mode or no lifecycle status: 5 items per row
+    // In two column mode: 3 items per row
+    const boxesPerRow = (hasAnyLifecycleStatus && showCurrent && showTarget) ? 3 : 5
     
     // Adjust column widths for single column mode (use full width)
     const effectiveCurrentColWidth = showCurrent && showTarget ? currentColWidth : (showCurrent ? currentColWidth + targetColWidth + colGap : 0)
@@ -1106,10 +1110,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
             // Draw items for this roll-up group
             if (showCurrent) {
               const currentStartX = padding + primaryColWidth + colGap
+              // Calculate available width and center-align items
+              const availableWidth = effectiveCurrentColWidth
+              const itemsWidth = Math.min(group.divestItems.length, boxesPerRow) * boxWidth + (Math.min(group.divestItems.length, boxesPerRow) - 1) * boxGap
+              const centerOffset = (availableWidth - itemsWidth) / 2
               group.divestItems.forEach((item: ItemRecord, itemIdx: number) => {
               const col = itemIdx % boxesPerRow
               const row = Math.floor(itemIdx / boxesPerRow)
-              const boxX = currentStartX + col * (boxWidth + boxGap)
+              const boxX = currentStartX + centerOffset + col * (boxWidth + boxGap)
               const boxY = rowY + 20 + row * (boxHeight + boxGap)
 
               // Box
@@ -1165,10 +1173,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               const targetStartX = showCurrent 
                 ? padding + primaryColWidth + colGap + currentColWidth + colGap
                 : padding + primaryColWidth + colGap
+              // Calculate available width and center-align items
+              const availableWidth = effectiveTargetColWidth
+              const itemsWidth = Math.min(group.targetItems.length, boxesPerRow) * boxWidth + (Math.min(group.targetItems.length, boxesPerRow) - 1) * boxGap
+              const centerOffset = (availableWidth - itemsWidth) / 2
               group.targetItems.forEach((item: ItemRecord, itemIdx: number) => {
               const col = itemIdx % boxesPerRow
               const row = Math.floor(itemIdx / boxesPerRow)
-              const boxX = targetStartX + col * (boxWidth + boxGap)
+              const boxX = targetStartX + centerOffset + col * (boxWidth + boxGap)
               const boxY = rowY + 20 + row * (boxHeight + boxGap)
 
               // Box
@@ -1246,10 +1258,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
             
             if (showCurrent) {
               const currentStartX = padding + primaryColWidth + colGap
+              // Center-align items
+              const availableWidth = effectiveCurrentColWidth
+              const itemsWidth = Math.min(ungroupedCurrent.length, boxesPerRow) * boxWidth + (Math.min(ungroupedCurrent.length, boxesPerRow) - 1) * boxGap
+              const centerOffset = (availableWidth - itemsWidth) / 2
               ungroupedCurrent.forEach((item: ItemRecord, itemIdx: number) => {
               const col = itemIdx % boxesPerRow
               const row = Math.floor(itemIdx / boxesPerRow)
-              const boxX = currentStartX + col * (boxWidth + boxGap)
+              const boxX = currentStartX + centerOffset + col * (boxWidth + boxGap)
               const boxY = rowY + 20 + row * (boxHeight + boxGap)
 
               const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
@@ -1281,10 +1297,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               const targetStartX = showCurrent 
                 ? padding + primaryColWidth + colGap + currentColWidth + colGap
                 : padding + primaryColWidth + colGap
+              // Center-align items
+              const availableWidth = effectiveTargetColWidth
+              const itemsWidth = Math.min(ungroupedTarget.length, boxesPerRow) * boxWidth + (Math.min(ungroupedTarget.length, boxesPerRow) - 1) * boxGap
+              const centerOffset = (availableWidth - itemsWidth) / 2
               ungroupedTarget.forEach((item: ItemRecord, itemIdx: number) => {
               const col = itemIdx % boxesPerRow
               const row = Math.floor(itemIdx / boxesPerRow)
-              const boxX = targetStartX + col * (boxWidth + boxGap)
+              const boxX = targetStartX + centerOffset + col * (boxWidth + boxGap)
               const boxY = rowY + 20 + row * (boxHeight + boxGap)
 
               const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
@@ -1360,10 +1380,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
         // Current column items
         if (showCurrent) {
           const currentStartX = padding + primaryColWidth + colGap
+          // Center-align items
+          const availableWidth = effectiveCurrentColWidth
+          const itemsWidth = Math.min(divestItems.length, boxesPerRow) * boxWidth + (Math.min(divestItems.length, boxesPerRow) - 1) * boxGap
+          const centerOffset = (availableWidth - itemsWidth) / 2
           divestItems.forEach((item: ItemRecord, itemIdx: number) => {
           const col = itemIdx % boxesPerRow
           const row = Math.floor(itemIdx / boxesPerRow)
-          const boxX = currentStartX + col * (boxWidth + boxGap)
+          const boxX = currentStartX + centerOffset + col * (boxWidth + boxGap)
           const boxY = rowY + row * (boxHeight + boxGap)
 
           // Box
@@ -1420,10 +1444,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           const targetStartX = showCurrent 
             ? padding + primaryColWidth + colGap + currentColWidth + colGap
             : padding + primaryColWidth + colGap
+          // Center-align items
+          const availableWidth = effectiveTargetColWidth
+          const itemsWidth = Math.min(targetItems.length, boxesPerRow) * boxWidth + (Math.min(targetItems.length, boxesPerRow) - 1) * boxGap
+          const centerOffset = (availableWidth - itemsWidth) / 2
           targetItems.forEach((item: ItemRecord, itemIdx: number) => {
           const col = itemIdx % boxesPerRow
           const row = Math.floor(itemIdx / boxesPerRow)
-          const boxX = targetStartX + col * (boxWidth + boxGap)
+          const boxX = targetStartX + centerOffset + col * (boxWidth + boxGap)
           const boxY = rowY + row * (boxHeight + boxGap)
 
           // Box
@@ -1556,11 +1584,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                    item.lifecycleStatus === 'Stable' ||
                    (!item.lifecycleStatus)
           })
-          
+          // Center-align items
+          const availableWidth = effectiveCurrentColWidth
+          const itemsWidth = Math.min(currentItems.length, boxesPerRow) * boxWidth + (Math.min(currentItems.length, boxesPerRow) - 1) * boxGap
+          const centerOffset = (availableWidth - itemsWidth) / 2
           currentItems.forEach((item: ItemRecord, itemIdx: number) => {
             const col = itemIdx % boxesPerRow
             const row = Math.floor(itemIdx / boxesPerRow)
-            const boxX = currentStartX + col * (boxWidth + boxGap)
+            const boxX = currentStartX + centerOffset + col * (boxWidth + boxGap)
             const boxY = currentY + row * (boxHeight + boxGap)
             
             const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
@@ -1605,11 +1636,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           const targetItems = unrelatedSecondaryItems.filter(item => {
             return item.lifecycleStatus !== 'Divest'
           })
-          
+          // Center-align items
+          const availableWidth = effectiveTargetColWidth
+          const itemsWidth = Math.min(targetItems.length, boxesPerRow) * boxWidth + (Math.min(targetItems.length, boxesPerRow) - 1) * boxGap
+          const centerOffset = (availableWidth - itemsWidth) / 2
           targetItems.forEach((item: ItemRecord, itemIdx: number) => {
             const col = itemIdx % boxesPerRow
             const row = Math.floor(itemIdx / boxesPerRow)
-            const boxX = targetStartX + col * (boxWidth + boxGap)
+            const boxX = targetStartX + centerOffset + col * (boxWidth + boxGap)
             const boxY = currentY + row * (boxHeight + boxGap)
             
             const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
@@ -1662,10 +1696,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       } else {
         // No lifecycle status - show all unrelated items in single column
         const itemsStartX = padding + primaryColWidth + colGap
+        // Center-align items
+        const availableWidth = totalWidth - padding - primaryColWidth - colGap - padding
+        const itemsWidth = Math.min(unrelatedSecondaryItems.length, boxesPerRow) * boxWidth + (Math.min(unrelatedSecondaryItems.length, boxesPerRow) - 1) * boxGap
+        const centerOffset = (availableWidth - itemsWidth) / 2
         unrelatedSecondaryItems.forEach((item: ItemRecord, itemIdx: number) => {
           const col = itemIdx % boxesPerRow
           const row = Math.floor(itemIdx / boxesPerRow)
-          const boxX = itemsStartX + col * (boxWidth + boxGap)
+          const boxX = itemsStartX + centerOffset + col * (boxWidth + boxGap)
           const boxY = currentY + row * (boxHeight + boxGap)
           
           const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
@@ -1728,6 +1766,339 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
+  }
+
+  // Export as PNG
+  async function handleExportPNG() {
+    if (!contentRef.current || !primaryLens || !secondaryLens || itemAnalysis.length === 0) return
+
+    // First generate SVG (reuse the SVG generation logic)
+    // Helper function to wrap text for SVG
+    function wrapText(text: string, maxWidth: number, fontSize: number = 10): string[] {
+      if (!text) return []
+      const words = text.split(' ')
+      const lines: string[] = []
+      let currentLine = ''
+      
+      words.forEach(word => {
+        const testLine = currentLine ? `${currentLine} ${word}` : word
+        const width = testLine.length * fontSize * 0.6
+        if (width > maxWidth && currentLine) {
+          lines.push(currentLine)
+          currentLine = word
+        } else {
+          currentLine = testLine
+        }
+      })
+      if (currentLine) lines.push(currentLine)
+      return lines.length > 0 ? lines : [text]
+    }
+
+    // Helper functions to get SVG colors using theme
+    function getSVGBoxFill(status?: LifecycleStatus): string {
+      if (status === 'Divest') return theme.colors.error + '1a'
+      if (status === 'Invest') return theme.colors.success + '1a'
+      if (status === 'Plan') return theme.colors.info + '1a'
+      if (status === 'Emerging') return theme.colors.warning + '1a'
+      if (!status) return theme.colors.primary + '1a'
+      return theme.colors.primary + '1a'
+    }
+
+    function getSVGBoxStroke(status?: LifecycleStatus): string {
+      if (status === 'Divest') return theme.colors.error
+      if (status === 'Invest') return theme.colors.success
+      if (status === 'Plan') return theme.colors.info
+      if (status === 'Emerging') return theme.colors.warning
+      if (!status) return theme.colors.primary
+      return theme.colors.primary
+    }
+
+    // Calculate dimensions (same as SVG export)
+    const padding = 20
+    const rowHeight = 60
+    const headerHeight = 40
+    const primaryColWidth = 200
+    const currentColWidth = 400
+    const targetColWidth = 400
+    const colGap = 20
+    const rowGap = 10
+    const boxHeight = 40
+    const boxWidth = 120
+    const boxGap = 4
+    
+    // Determine which columns to show
+    const showCurrent = columnViewMode === 'both' || columnViewMode === 'current'
+    const showTarget = columnViewMode === 'both' || columnViewMode === 'target'
+    
+    // Calculate boxesPerRow dynamically to match live view
+    const boxesPerRow = (hasAnyLifecycleStatus && showCurrent && showTarget) ? 3 : 5
+
+    // Adjust column widths for single column mode
+    const effectiveCurrentColWidth = showCurrent && showTarget ? currentColWidth : (showCurrent ? currentColWidth + targetColWidth + colGap : 0)
+    const effectiveTargetColWidth = showCurrent && showTarget ? targetColWidth : (showTarget ? currentColWidth + targetColWidth + colGap : 0)
+
+    // Calculate total height (simplified - reuse same logic as SVG)
+    let calculatedHeight = padding + headerHeight
+    sortedParents.forEach(parent => {
+      const groupItems = groupedItemAnalysis.get(parent)!
+      if (parent) {
+        calculatedHeight += 20
+      }
+      groupItems.forEach((analysis: any) => {
+        const { divestItems, targetItems, hasRollup, rollupGroups, ungroupedSecondaryItems } = analysis
+        if (hasRollup && rollupGroups) {
+          rollupGroups.forEach((group: any) => {
+            const currentItems = showCurrent ? group.divestItems.length : 0
+            const targetItemsCount = showTarget ? group.targetItems.length : 0
+            const maxItems = Math.max(currentItems, targetItemsCount)
+            const numRows = Math.ceil(maxItems / boxesPerRow)
+            const rowHeightForItem = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight) + 20
+            calculatedHeight += rowHeightForItem + rowGap
+          })
+          if (ungroupedSecondaryItems && ungroupedSecondaryItems.length > 0) {
+            const currentItems = showCurrent ? ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).length : 0
+            const targetItemsCount = showTarget ? ungroupedSecondaryItems.filter((item: ItemRecord) => targetItems.includes(item)).length : 0
+            const maxItems = Math.max(currentItems, targetItemsCount)
+            const numRows = Math.ceil(maxItems / boxesPerRow)
+            const rowHeightForItem = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight) + 20
+            calculatedHeight += rowHeightForItem + rowGap
+          }
+        } else {
+          const currentItems = showCurrent ? divestItems.length : 0
+          const targetItemsCount = showTarget ? targetItems.length : 0
+          const maxItems = Math.max(currentItems, targetItemsCount)
+          const numRows = Math.ceil(maxItems / boxesPerRow)
+          const rowHeightForItem = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight)
+          calculatedHeight += rowHeightForItem + rowGap
+        }
+      })
+    })
+
+    // Calculate total width
+    let totalWidth = padding + primaryColWidth
+    if (showCurrent && showTarget) {
+      totalWidth += colGap + currentColWidth + colGap + targetColWidth
+    } else if (showCurrent) {
+      totalWidth += colGap + effectiveCurrentColWidth
+    } else if (showTarget) {
+      totalWidth += colGap + effectiveTargetColWidth
+    }
+    totalWidth += padding
+    const initialHeight = calculatedHeight + padding
+
+    // Create SVG (simplified version for PNG - reuse handleExportSVG logic but convert to PNG)
+    // For now, we'll call handleExportSVG's logic by creating the SVG inline
+    // Actually, let's reuse the SVG export function's logic by calling it and converting
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.setAttribute('width', String(totalWidth))
+    svg.setAttribute('height', String(initialHeight))
+    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+
+    // Add style element
+    const style = document.createElementNS('http://www.w3.org/2000/svg', 'style')
+    style.textContent = `
+      .header { font-family: ${theme.fonts.heading}; font-size: 12px; font-weight: 600; fill: ${theme.colors.text}; }
+      .primary-name { font-family: ${theme.fonts.heading}; font-size: 12px; font-weight: bold; fill: ${theme.colors.text}; }
+      .primary-desc { font-family: ${theme.fonts.body}; font-size: 10px; fill: ${theme.colors.textSecondary}; }
+      .item-name { font-family: ${theme.fonts.body}; font-size: 10px; fill: ${theme.colors.text}; }
+      .item-minor { font-family: ${theme.fonts.body}; font-size: 8px; fill: ${theme.colors.textSecondary}; }
+      .parent-label { font-family: ${theme.fonts.body}; font-size: 10px; font-weight: 500; fill: ${theme.colors.textSecondary}; }
+    `
+    svg.appendChild(style)
+
+    // Background
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+    bg.setAttribute('width', String(totalWidth))
+    bg.setAttribute('height', String(initialHeight))
+    bg.setAttribute('fill', theme.colors.background)
+    svg.appendChild(bg)
+
+    // Column headers
+    let headerY = padding + headerHeight
+    const headerLine = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+    headerLine.setAttribute('x1', String(padding))
+    headerLine.setAttribute('y1', String(headerY))
+    headerLine.setAttribute('x2', String(totalWidth - padding))
+    headerLine.setAttribute('y2', String(headerY))
+    headerLine.setAttribute('stroke', theme.colors.border)
+    headerLine.setAttribute('stroke-width', '2')
+    svg.appendChild(headerLine)
+
+    const primaryLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+    primaryLabel.setAttribute('x', String(padding + primaryColWidth / 2))
+    primaryLabel.setAttribute('y', String(headerY - 10))
+    primaryLabel.setAttribute('class', 'header')
+    primaryLabel.setAttribute('text-anchor', 'middle')
+    primaryLabel.textContent = LENSES.find(l => l.key === primaryLens)?.label || primaryLens
+    svg.appendChild(primaryLabel)
+
+    if (showCurrent) {
+      const currentLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+      const currentLabelX = showCurrent && showTarget 
+        ? padding + primaryColWidth + colGap + currentColWidth / 2
+        : padding + primaryColWidth + colGap + effectiveCurrentColWidth / 2
+      currentLabel.setAttribute('x', String(currentLabelX))
+      currentLabel.setAttribute('y', String(headerY - 10))
+      currentLabel.setAttribute('class', 'header')
+      currentLabel.setAttribute('text-anchor', 'middle')
+      currentLabel.textContent = 'Current'
+      svg.appendChild(currentLabel)
+    }
+
+    if (showTarget) {
+      const targetLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+      const targetLabelX = showCurrent && showTarget
+        ? padding + primaryColWidth + colGap + currentColWidth + colGap + targetColWidth / 2
+        : padding + primaryColWidth + colGap + effectiveTargetColWidth / 2
+      targetLabel.setAttribute('x', String(targetLabelX))
+      targetLabel.setAttribute('y', String(headerY - 10))
+      targetLabel.setAttribute('class', 'header')
+      targetLabel.setAttribute('text-anchor', 'middle')
+      targetLabel.textContent = 'Target'
+      svg.appendChild(targetLabel)
+    }
+
+    // Draw items - reuse same logic as handleExportSVG
+    let currentY = headerY + padding + rowGap
+    sortedParents.forEach(parent => {
+      const groupItems = groupedItemAnalysis.get(parent)!
+      
+      if (parent) {
+        const parentText = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+        parentText.setAttribute('x', String(padding))
+        parentText.setAttribute('y', String(currentY))
+        parentText.setAttribute('class', 'parent-label')
+        parentText.textContent = parent
+        svg.appendChild(parentText)
+        currentY += 20
+      }
+
+      groupItems.forEach((analysis: any) => {
+        const { primaryItem, divestItems, targetItems } = analysis
+        const maxItems = Math.max(divestItems.length, targetItems.length)
+        const numRows = Math.ceil(maxItems / boxesPerRow)
+        const rowHeightForItem = Math.max(boxHeight * numRows + boxGap * (numRows - 1), rowHeight)
+        const rowY = currentY
+
+        const primaryName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+        primaryName.setAttribute('x', String(padding + 10))
+        primaryName.setAttribute('y', String(rowY + 20))
+        primaryName.setAttribute('class', 'primary-name')
+        primaryName.textContent = primaryItem.name
+        svg.appendChild(primaryName)
+
+        if (showCurrent) {
+          const currentStartX = padding + primaryColWidth + colGap
+          const availableWidth = effectiveCurrentColWidth
+          const itemsWidth = Math.min(divestItems.length, boxesPerRow) * boxWidth + (Math.min(divestItems.length, boxesPerRow) - 1) * boxGap
+          const centerOffset = (availableWidth - itemsWidth) / 2
+          divestItems.forEach((item: ItemRecord, itemIdx: number) => {
+            const col = itemIdx % boxesPerRow
+            const row = Math.floor(itemIdx / boxesPerRow)
+            const boxX = currentStartX + centerOffset + col * (boxWidth + boxGap)
+            const boxY = rowY + row * (boxHeight + boxGap)
+            const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+            box.setAttribute('x', String(boxX))
+            box.setAttribute('y', String(boxY))
+            box.setAttribute('width', String(boxWidth))
+            box.setAttribute('height', String(boxHeight))
+            box.setAttribute('rx', '4')
+            box.setAttribute('fill', getSVGBoxFill(item.lifecycleStatus))
+            box.setAttribute('stroke', getSVGBoxStroke(item.lifecycleStatus))
+            box.setAttribute('stroke-width', '1')
+            svg.appendChild(box)
+            const nameLines = wrapText(item.name, boxWidth - 8, 10)
+            nameLines.forEach((line, lineIdx) => {
+              const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+              itemName.setAttribute('x', String(boxX + boxWidth / 2))
+              itemName.setAttribute('y', String(boxY + 12 + lineIdx * 11))
+              itemName.setAttribute('class', 'item-name')
+              itemName.setAttribute('text-anchor', 'middle')
+              itemName.textContent = line
+              svg.appendChild(itemName)
+            })
+          })
+        }
+
+        if (showTarget) {
+          const targetStartX = showCurrent 
+            ? padding + primaryColWidth + colGap + currentColWidth + colGap
+            : padding + primaryColWidth + colGap
+          const availableWidth = effectiveTargetColWidth
+          const itemsWidth = Math.min(targetItems.length, boxesPerRow) * boxWidth + (Math.min(targetItems.length, boxesPerRow) - 1) * boxGap
+          const centerOffset = (availableWidth - itemsWidth) / 2
+          targetItems.forEach((item: ItemRecord, itemIdx: number) => {
+            const col = itemIdx % boxesPerRow
+            const row = Math.floor(itemIdx / boxesPerRow)
+            const boxX = targetStartX + centerOffset + col * (boxWidth + boxGap)
+            const boxY = rowY + row * (boxHeight + boxGap)
+            const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+            box.setAttribute('x', String(boxX))
+            box.setAttribute('y', String(boxY))
+            box.setAttribute('width', String(boxWidth))
+            box.setAttribute('height', String(boxHeight))
+            box.setAttribute('rx', '4')
+            box.setAttribute('fill', getSVGBoxFill(item.lifecycleStatus))
+            box.setAttribute('stroke', getSVGBoxStroke(item.lifecycleStatus))
+            box.setAttribute('stroke-width', '1')
+            svg.appendChild(box)
+            const nameLines = wrapText(item.name, boxWidth - 8, 10)
+            nameLines.forEach((line, lineIdx) => {
+              const itemName = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+              itemName.setAttribute('x', String(boxX + boxWidth / 2))
+              itemName.setAttribute('y', String(boxY + 12 + lineIdx * 11))
+              itemName.setAttribute('class', 'item-name')
+              itemName.setAttribute('text-anchor', 'middle')
+              itemName.textContent = line
+              svg.appendChild(itemName)
+            })
+          })
+        }
+
+        currentY += rowHeightForItem + rowGap
+      })
+    })
+
+    const finalHeight = currentY + padding
+    svg.setAttribute('height', String(finalHeight))
+    bg.setAttribute('height', String(finalHeight))
+
+    // Convert SVG to PNG
+    const svgString = new XMLSerializer().serializeToString(svg)
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' })
+    const svgUrl = URL.createObjectURL(svgBlob)
+
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = totalWidth
+      canvas.height = initialHeight
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.fillStyle = theme.colors.background
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.drawImage(img, 0, 0)
+        
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = `target-view-${new Date().toISOString().split('T')[0]}.png`
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            URL.revokeObjectURL(url)
+          }
+          URL.revokeObjectURL(svgUrl)
+        }, 'image/png')
+      }
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(svgUrl)
+      alert('Failed to export PNG. Please try exporting as SVG instead.')
+    }
+    img.src = svgUrl
   }
 
   // Filter items for autocomplete
@@ -1827,13 +2198,22 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
             <h1 className="text-lg sm:text-xl font-semibold shrink-0">Target View</h1>
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 flex-1 min-w-0">
               {primaryLens && secondaryLens && itemAnalysis.length > 0 && (
-                <button
-                  onClick={handleExportSVG}
-                  className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
-                  title="Export as SVG"
-                >
-                  Export SVG
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleExportSVG}
+                    className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
+                    title="Export as SVG"
+                  >
+                    Export SVG
+                  </button>
+                  <button
+                    onClick={handleExportPNG}
+                    className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
+                    title="Export as PNG"
+                  >
+                    Export PNG
+                  </button>
+                </div>
               )}
               <label className="flex items-center gap-1 shrink-0">
                 <span className="text-xs whitespace-nowrap">Primary:</span>

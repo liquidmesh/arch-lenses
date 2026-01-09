@@ -343,16 +343,21 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
         return false
       })
 
-      // Target includes items unless relationship is planned-to-remove
+      // Target includes items unless:
+      // 1. Relationship is planned-to-remove
+      // 2. Item lifecycle status is "Divest"
       const targetItemsWithNoStatus = dedupeItems([
         ...relatedItems.filter(item => {
           const relLifecycle = itemRelLifecycleMap.get(item.id!)
           if (relLifecycle === 'Planned to remove') return false
+          if (item.lifecycleStatus === 'Divest') return false
           return true
         }),
         ...itemsWithNoStatus.filter(item => {
           const relLifecycle = itemRelLifecycleMap.get(item.id!)
-          return relLifecycle !== 'Planned to remove'
+          if (relLifecycle === 'Planned to remove') return false
+          if (item.lifecycleStatus === 'Divest') return false
+          return true
         }),
       ])
       // Keep legacy fields for downstream rendering (currently unused but expected)

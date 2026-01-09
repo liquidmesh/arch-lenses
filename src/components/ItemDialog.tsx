@@ -541,7 +541,67 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
       {!isNew && (
         <div className="mt-6">
           <h4 className="font-medium mb-2">Relationships</h4>
-          <div className="space-y-2 mb-3">
+          {/* Add relationship form - moved above the list */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end mb-3">
+            <div>
+              <label className="block text-xs mb-1">Target lens</label>
+              <select value={targetLens} onChange={e => setTargetLens(e.target.value as LensKey)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700">
+                {lensOptions.map(o => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs mb-1">Relationship type / role / note</label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                <select
+                  value={newRelationshipType}
+                  onChange={e => {
+                    const next = e.target.value as RelationshipType
+                    setNewRelationshipType(next)
+                    const sides = getRelationshipSides(next)
+                    setNewRelationshipRole(sides.from)
+                  }}
+                  className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700"
+                >
+                  {BASE_RELATIONSHIP_TYPES.map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+                {newRelationshipType !== 'Default' && (
+                  <select
+                    value={newRelationshipRole}
+                    onChange={e => setNewRelationshipRole(e.target.value as RelationshipSideLabel)}
+                    className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700"
+                  >
+                    {(() => {
+                      const sides = getRelationshipSides(newRelationshipType)
+                      return [sides.from, sides.to].map((role, idx) => (
+                        <option key={`${role}-${idx}`} value={role}>{role}</option>
+                      ))
+                    })()}
+                  </select>
+                )}
+                <input
+                  value={newRelationshipNote}
+                  onChange={e => setNewRelationshipNote(e.target.value)}
+                  className="flex-1 min-w-[150px] px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700"
+                  placeholder="Note (optional)"
+                />
+              </div>
+              <label className="block text-xs mb-1">Search target items</label>
+              <input value={targetQuery} onChange={e => setTargetQuery(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" placeholder="Type to search..." />
+              <div className="mt-2 max-h-40 overflow-auto border border-slate-200 dark:border-slate-800 rounded">
+                {targetItems.map(t => (
+                  <button key={t.id} className="block w-full text-left px-2 py-1 hover:bg-slate-50 dark:hover:bg-slate-800" onClick={() => addRelationship(t.id!, t.lens)}>
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          {/* Relationships list - removed borders and vertical padding */}
+          <div className="mb-3">
             {rels.length === 0 && <span className="text-slate-500 text-sm">No relationships</span>}
             {rels.map(r => {
               const relatedItem = relatedItems.get(r.toItemId)
@@ -554,7 +614,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
               const fromRole: RelationshipSideLabel = r.fromItemIdRelationshipType || sides.from
               const lifecycle: RelationshipLifecycleStatus = r.lifecycleStatus || 'Existing'
               return (
-                <div key={r.id} className="flex items-center gap-2 p-2 border border-slate-200 dark:border-slate-800 rounded">
+                <div key={r.id} className="flex items-center gap-2 py-1">
                   <span className="flex-1 text-sm">
                     {lensLabel(r.toLens)}: {relatedItem?.name || `#${r.toItemId}`}
                   </span>
@@ -661,64 +721,6 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
                 </div>
               )
             })}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
-            <div>
-              <label className="block text-xs mb-1">Target lens</label>
-              <select value={targetLens} onChange={e => setTargetLens(e.target.value as LensKey)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700">
-                {lensOptions.map(o => (
-                  <option key={o.key} value={o.key}>{o.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-xs mb-1">Relationship type / role / note</label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                <select
-                  value={newRelationshipType}
-                  onChange={e => {
-                    const next = e.target.value as RelationshipType
-                    setNewRelationshipType(next)
-                    const sides = getRelationshipSides(next)
-                    setNewRelationshipRole(sides.from)
-                  }}
-                  className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700"
-                >
-                  {BASE_RELATIONSHIP_TYPES.map(opt => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
-                {newRelationshipType !== 'Default' && (
-                  <select
-                    value={newRelationshipRole}
-                    onChange={e => setNewRelationshipRole(e.target.value as RelationshipSideLabel)}
-                    className="px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700"
-                  >
-                    {(() => {
-                      const sides = getRelationshipSides(newRelationshipType)
-                      return [sides.from, sides.to].map((role, idx) => (
-                        <option key={`${role}-${idx}`} value={role}>{role}</option>
-                      ))
-                    })()}
-                  </select>
-                )}
-                <input
-                  value={newRelationshipNote}
-                  onChange={e => setNewRelationshipNote(e.target.value)}
-                  className="flex-1 min-w-[150px] px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700"
-                  placeholder="Note (optional)"
-                />
-              </div>
-              <label className="block text-xs mb-1">Search target items</label>
-              <input value={targetQuery} onChange={e => setTargetQuery(e.target.value)} className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700" placeholder="Type to search..." />
-              <div className="mt-2 max-h-40 overflow-auto border border-slate-200 dark:border-slate-800 rounded">
-                {targetItems.map(t => (
-                  <button key={t.id} className="block w-full text-left px-2 py-1 hover:bg-slate-50 dark:hover:bg-slate-800" onClick={() => addRelationship(t.id!, t.lens)}>
-                    {t.name}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       )}

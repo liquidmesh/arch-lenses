@@ -1795,6 +1795,36 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       return `#${toHex(r)}${toHex(g)}${toHex(b)}`
     }
     
+    // Helper function to blend color with white background to simulate transparency
+    // Converts 8-digit hex (with alpha) to 6-digit hex by blending with white
+    function convert8DigitHexTo6Digit(hex8: string): string {
+      // Match 8-digit hex like #ef44441a
+      const match = hex8.match(/^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})$/)
+      if (!match) return hex8 // Return as-is if not 8-digit hex
+      
+      const rgbHex = match[1]
+      const alphaHex = match[2]
+      const alpha = parseInt(alphaHex, 16) / 255 // Convert to 0-1 range
+      
+      // Extract RGB components
+      const r = parseInt(rgbHex.substring(0, 2), 16)
+      const g = parseInt(rgbHex.substring(2, 4), 16)
+      const b = parseInt(rgbHex.substring(4, 6), 16)
+      
+      // Blend with white background (255, 255, 255)
+      // Formula: blended = color * alpha + white * (1 - alpha)
+      const blendedR = Math.round(r * alpha + 255 * (1 - alpha))
+      const blendedG = Math.round(g * alpha + 255 * (1 - alpha))
+      const blendedB = Math.round(b * alpha + 255 * (1 - alpha))
+      
+      const toHex = (n: number) => {
+        const hex = n.toString(16)
+        return hex.length === 1 ? '0' + hex : hex
+      }
+      
+      return `#${toHex(blendedR)}${toHex(blendedG)}${toHex(blendedB)}`
+    }
+    
     // Convert all rect fill colors to RGB hex
     const rectElements = svg.querySelectorAll('rect')
     rectElements.forEach(rectEl => {
@@ -1814,8 +1844,12 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       
       let convertedFill = fill
       
+      // If fill is 8-digit hex (with alpha), convert to 6-digit by blending with white
+      if (fill.match(/^#[0-9a-fA-F]{8}$/)) {
+        convertedFill = convert8DigitHexTo6Digit(fill)
+      }
       // If fill is HSL, convert to RGB hex
-      if (fill.startsWith('hsl(')) {
+      else if (fill.startsWith('hsl(')) {
         convertedFill = hslToRgbHex(fill)
       } 
       // If fill is rgba/rgb, convert to hex
@@ -2197,6 +2231,36 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       return `#${toHex(r)}${toHex(g)}${toHex(b)}`
     }
     
+    // Helper function to blend color with white background to simulate transparency
+    // Converts 8-digit hex (with alpha) to 6-digit hex by blending with white
+    function convert8DigitHexTo6Digit(hex8: string): string {
+      // Match 8-digit hex like #ef44441a
+      const match = hex8.match(/^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})$/)
+      if (!match) return hex8 // Return as-is if not 8-digit hex
+      
+      const rgbHex = match[1]
+      const alphaHex = match[2]
+      const alpha = parseInt(alphaHex, 16) / 255 // Convert to 0-1 range
+      
+      // Extract RGB components
+      const r = parseInt(rgbHex.substring(0, 2), 16)
+      const g = parseInt(rgbHex.substring(2, 4), 16)
+      const b = parseInt(rgbHex.substring(4, 6), 16)
+      
+      // Blend with white background (255, 255, 255)
+      // Formula: blended = color * alpha + white * (1 - alpha)
+      const blendedR = Math.round(r * alpha + 255 * (1 - alpha))
+      const blendedG = Math.round(g * alpha + 255 * (1 - alpha))
+      const blendedB = Math.round(b * alpha + 255 * (1 - alpha))
+      
+      const toHex = (n: number) => {
+        const hex = n.toString(16)
+        return hex.length === 1 ? '0' + hex : hex
+      }
+      
+      return `#${toHex(blendedR)}${toHex(blendedG)}${toHex(blendedB)}`
+    }
+    
     // Convert all rect fill colors to RGB hex
     const rectElements = svg.querySelectorAll('rect')
     rectElements.forEach(rectEl => {
@@ -2216,8 +2280,12 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       
       let convertedFill = fill
       
+      // If fill is 8-digit hex (with alpha), convert to 6-digit by blending with white
+      if (fill.match(/^#[0-9a-fA-F]{8}$/)) {
+        convertedFill = convert8DigitHexTo6Digit(fill)
+      }
       // If fill is HSL, convert to RGB hex
-      if (fill.startsWith('hsl(')) {
+      else if (fill.startsWith('hsl(')) {
         convertedFill = hslToRgbHex(fill)
       } 
       // If fill is rgba/rgb, convert to hex

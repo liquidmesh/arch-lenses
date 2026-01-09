@@ -30,9 +30,9 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     const saved = localStorage.getItem('graph-layout-mode')
     return (saved === 'rows' || saved === 'columns') ? saved : 'columns'
   })
-  const [viewMode, setViewMode] = useState<'skillGaps' | 'tags' | 'summary' | 'tasks'>(() => {
+  const [viewMode, setViewMode] = useState<'skillGaps' | 'tags' | 'summary' | 'tasks' | 'minimal'>(() => {
     const saved = localStorage.getItem('graph-view-mode')
-    return (saved === 'skillGaps' || saved === 'tags' || saved === 'summary' || saved === 'tasks') ? saved : 'summary'
+    return (saved === 'skillGaps' || saved === 'tags' || saved === 'summary' || saved === 'tasks' || saved === 'minimal') ? saved : 'summary'
   })
   const [zoom, setZoom] = useState(() => {
     const saved = localStorage.getItem('graph-zoom')
@@ -61,6 +61,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   const [showDetailsBox, setShowDetailsBox] = useState(true)
   const [relatedNotes, setRelatedNotes] = useState<MeetingNote[]>([])
   const [relatedTasks, setRelatedTasks] = useState<Task[]>([])
+  const [relatedItemsMap, setRelatedItemsMap] = useState<Map<number, ItemRecord>>(new Map())
   
   const svgRef = useRef<SVGSVGElement>(null)
   
@@ -104,6 +105,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     if (!selectedItemId) {
       setRelatedNotes([])
       setRelatedTasks([])
+      setRelatedItemsMap(new Map())
       return
     }
     
@@ -137,6 +139,25 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
         return (b.createdAt || 0) - (a.createdAt || 0)
       })
       setRelatedTasks(sortedTasks)
+      
+      // Load related items (from relationships)
+      const itemRels = rels.filter(r => r.fromItemId === selectedItemId || r.toItemId === selectedItemId)
+      const relatedIds = new Set<number>()
+      itemRels.forEach(r => {
+        if (r.fromItemId === selectedItemId) relatedIds.add(r.toItemId)
+        if (r.toItemId === selectedItemId) relatedIds.add(r.fromItemId)
+      })
+      
+      if (relatedIds.size > 0) {
+        const relatedItems = await db.items.bulkGet(Array.from(relatedIds))
+        const map = new Map<number, ItemRecord>()
+        relatedItems.forEach(item => {
+          if (item) map.set(item.id!, item)
+        })
+        setRelatedItemsMap(map)
+      } else {
+        setRelatedItemsMap(new Map())
+      }
     }
     
     loadRelatedData()
@@ -879,7 +900,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   }, [viewMode, managerHierarchy, dims.w, zoom, visibleManagers])
 
   const layout = useMemo(() => {
-    const layoutResult = computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode, showParentBoxes, zoom)
+    const layoutResult = computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode, showParentBoxes, zoom, viewMode)
     // Adjust layout to account for manager row if in Architecture Coverage view
     if (viewMode === 'skillGaps' && managerPositions.size > 0) {
       // Calculate the maximum Y position of all managers to determine total height needed
@@ -961,8 +982,8 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
 
   // Get colors based on lifecycle status
   function getLifecycleColor(status?: LifecycleStatus): { fill: string; stroke: string } {
-    // Use theme colors for Summary view, hardcoded colors for other views
-    if (viewMode === 'summary') {
+    // Use theme colors for Summary and Minimal views, hardcoded colors for other views
+    if (viewMode === 'summary' || viewMode === 'minimal') {
       if (status === 'Divest') {
         return { fill: theme.colors.error + '1a', stroke: theme.colors.error }
       }
@@ -1310,8 +1331,8 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     }
     
     function getLifecycleColor(status) {
-      // Use theme colors for Summary view, hardcoded colors for other views
-      if (exportData.viewMode === 'summary') {
+      // Use theme colors for Summary and Minimal views, hardcoded colors for other views
+      if (exportData.viewMode === 'summary' || exportData.viewMode === 'minimal') {
         const theme = exportData.theme;
         if (status === 'Divest') {
           return { fill: theme.colors.error + '1a', stroke: theme.colors.error };
@@ -1413,7 +1434,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
             return { fill: getTagColor(item.tags[0]), stroke: getTagBorderColor(item.tags[0]) };
           }
           return { fill: isActive ? "#e5e7eb" : "#f3f4f6", stroke: isActive ? "#9ca3af" : "#d1d5db" };
-        } else if (viewMode === 'summary') {
+        } else if (viewMode === 'summary' || viewMode === 'minimal') {
           const colors = getLifecycleColor(item.lifecycleStatus);
           return colors;
         } else {
@@ -1623,13 +1644,14 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
                 <span className="mr-1">View:</span>
                 <select 
                   value={viewMode} 
-                  onChange={e => setViewMode(e.target.value as 'skillGaps' | 'tags' | 'summary' | 'tasks')}
+                  onChange={e => setViewMode(e.target.value as 'skillGaps' | 'tags' | 'summary' | 'tasks' | 'minimal')}
                   className="px-2 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                 >
                   <option value="skillGaps">Architecture coverage</option>
                   <option value="tags">Tags</option>
                   <option value="summary">Summary</option>
                   <option value="tasks">Tasks</option>
+                  <option value="minimal">Minimal</option>
                 </select>
               </label>
               <label className="flex items-center gap-1 text-xs">
@@ -2057,8 +2079,8 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
               strokeColor = isActive ? "#9ca3af" : "#d1d5db"
             }
             strokeWidth = isHovered || isSelected ? 2 : (isRelated ? 2 : 1)
-          } else if (viewMode === 'summary') {
-            // Summary view: color by lifecycle status
+          } else if (viewMode === 'summary' || viewMode === 'minimal') {
+            // Summary/Minimal view: color by lifecycle status
             const lifecycleColors = getLifecycleColor(n.lifecycleStatus)
             fillColor = isActive ? lifecycleColors.fill : lifecycleColors.fill
             strokeColor = isActive ? lifecycleColors.stroke : lifecycleColors.stroke
@@ -2184,23 +2206,46 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
               )}
               
               {/* Name (wrapped) - always shown, clickable to edit */}
-              {nameLines.map((line, idx) => (
-                <text 
-                  key={`name-${idx}`} 
-                  x={n.x} 
-                  y={n.y - 22 + idx * 11} 
-                  textAnchor="middle" 
-                  className="fill-slate-800 dark:fill-slate-200 hover:fill-blue-600 dark:hover:fill-blue-400" 
-                  style={{ fontSize: 12, cursor: 'pointer' }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setEditItem(n)
-                    setEditDialogOpen(true)
-                  }}
-                >
-                  {line}
-                </text>
-              ))}
+              {nameLines.map((line, idx) => {
+                // Adjust vertical position for minimal view (smaller box) - center the text block
+                let nameY: number
+                if (viewMode === 'minimal') {
+                  // Center the text block vertically in the 30px box
+                  // In SVG, the y coordinate is the baseline of the text
+                  // For 12px font, we need to account for the text's visual center
+                  const fontSize = 12
+                  const lineSpacing = 11
+                  // Calculate total visual height: (lines - 1) * spacing + font size
+                  const totalVisualHeight = nameLines.length === 1 
+                    ? fontSize 
+                    : (nameLines.length - 1) * lineSpacing + fontSize
+                  // For 12px font, the baseline is typically ~10px from the top of the text
+                  // Add a small offset to better center (move down slightly)
+                  const baselineOffset = 10 // Approximate: baseline is ~10px from top for 12px font
+                  const centerOffset = 2 // Additional offset to move text down slightly for better centering
+                  const firstLineY = n.y - (totalVisualHeight / 2) + baselineOffset + centerOffset
+                  nameY = firstLineY + idx * lineSpacing
+                } else {
+                  nameY = n.y - 22 + idx * 11
+                }
+                return (
+                  <text 
+                    key={`name-${idx}`} 
+                    x={n.x} 
+                    y={nameY} 
+                    textAnchor="middle" 
+                    className="fill-slate-800 dark:fill-slate-200 hover:fill-blue-600 dark:hover:fill-blue-400" 
+                    style={{ fontSize: 12, cursor: 'pointer' }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setEditItem(n)
+                      setEditDialogOpen(true)
+                    }}
+                  >
+                    {line}
+                  </text>
+                )
+              })}
               
               {/* Tasks view: show task names or count */}
               {viewMode === 'tasks' && openTaskCount > 0 && (
@@ -2618,12 +2663,37 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
               </div>
             )}
             
+            {/* Related Items */}
+            {relatedItemsMap.size > 0 && (
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Related Items</div>
+                <div className="space-y-1">
+                  {Array.from(relatedItemsMap.entries()).map(([itemId, relatedItem]) => {
+                    const rel = rels.find(r => 
+                      (r.fromItemId === selectedItemId && r.toItemId === itemId) ||
+                      (r.toItemId === selectedItemId && r.fromItemId === itemId)
+                    )
+                    return (
+                      <div key={itemId} className="text-slate-600 dark:text-slate-400">
+                        <span className="font-medium">{lensLabel(relatedItem.lens)}:</span> {relatedItem.name}
+                        {rel?.relationshipType && rel.relationshipType !== 'Default' && (
+                          <span className="text-xs text-slate-500 dark:text-slate-500 ml-1">
+                            ({rel.relationshipType})
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+            
             {!selectedItem.description && !selectedItem.lifecycleStatus && !selectedItem.businessContact && 
              !selectedItem.techContact && !selectedItem.primaryArchitect && 
              (!selectedItem.secondaryArchitects || selectedItem.secondaryArchitects.length === 0) &&
              (!selectedItem.tags || selectedItem.tags.length === 0) && !selectedItem.skillsGaps && 
              !selectedItem.parent && (!selectedItem.hyperlinks || selectedItem.hyperlinks.length === 0) &&
-             relatedNotes.length === 0 && relatedTasks.length === 0 && (
+             relatedItemsMap.size === 0 && relatedNotes.length === 0 && relatedTasks.length === 0 && (
               <div className="text-slate-500 dark:text-slate-400 italic">No additional details</div>
             )}
           </div>
@@ -2665,7 +2735,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   )
 }
 
-function computeLayout(items: ItemRecord[], windowW: number, windowH: number, visibleLenses: typeof LENSES, mode: 'columns' | 'rows', showParentBoxes: boolean = true, zoom: number = 1) {
+function computeLayout(items: ItemRecord[], windowW: number, windowH: number, visibleLenses: typeof LENSES, mode: 'columns' | 'rows', showParentBoxes: boolean = true, zoom: number = 1, viewMode: 'skillGaps' | 'tags' | 'summary' | 'tasks' | 'minimal' = 'summary') {
   const padding = 16
   // When zoomed in (zoom > 1), calculate layout with more space to fit more items per row
   // Divide by zoom to account for the fact that we'll scale up, so we need less base space
@@ -2673,7 +2743,7 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
   const availableW = Math.max(320, (windowW / zoom) - padding * 2)
   const availableH = Math.max(240, (windowH / zoom) - padding * 2)
   const topOffset = 30
-  const nodeHeight = 70 // Increased for wrapped text
+  const nodeHeight = viewMode === 'minimal' ? 30 : 70 // Smaller height for minimal view
   const rowGap = 6
   const colGap = 5
 

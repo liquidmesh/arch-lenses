@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { db, getAllLenses } from '../db'
-import { type ItemRecord, type RelationshipRecord, type LensKey, type LifecycleStatus, type RelationshipLifecycleStatus, LENSES, getRelationshipSides } from '../types'
+import { type ItemRecord, type RelationshipRecord, type LensKey, type LifecycleStatus, type RelationshipLifecycleStatus, LENSES } from '../types'
 import { ItemDialog } from './ItemDialog'
 import { loadTheme, type Theme } from '../utils/theme'
 
@@ -33,18 +33,14 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     const saved = localStorage.getItem('divest-replacement-secondary-lens')
     return saved || ''
   })
-  const [thirdLens, setThirdLens] = useState<LensKey | ''>(() => {
-    const saved = localStorage.getItem('divest-replacement-third-lens')
-    return saved || ''
-  })
   const [filterItemId, setFilterItemId] = useState<number | null>(() => {
     const saved = localStorage.getItem('divest-replacement-filter-item-id')
     return saved ? parseInt(saved, 10) : null
   })
   const [filterItemQuery, setFilterItemQuery] = useState('')
-  const [minorTextOption, setMinorTextOption] = useState<'none' | 'lifecycle' | 'description' | 'people' | 'relationships' | 'skillsGaps'>(() => {
+  const [minorTextOption, setMinorTextOption] = useState<'none' | 'lifecycle' | 'description'>(() => {
     const saved = localStorage.getItem('divest-replacement-minor-text')
-    return (saved === 'none' || saved === 'lifecycle' || saved === 'description' || saved === 'people' || saved === 'relationships' || saved === 'skillsGaps') ? saved : 'lifecycle'
+    return (saved === 'none' || saved === 'lifecycle' || saved === 'description') ? saved : 'lifecycle'
   })
   const [rollupLens, setRollupLens] = useState<LensKey | '' | '__parent__'>(() => {
     const saved = localStorage.getItem('divest-replacement-rollup-lens')
@@ -101,15 +97,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       localStorage.removeItem('divest-replacement-secondary-lens')
     }
   }, [secondaryLens])
-
-  // Persist third lens to localStorage
-  useEffect(() => {
-    if (thirdLens) {
-      localStorage.setItem('divest-replacement-third-lens', thirdLens)
-    } else {
-      localStorage.removeItem('divest-replacement-third-lens')
-    }
-  }, [thirdLens])
 
   // Persist filter item to localStorage
   useEffect(() => {
@@ -172,13 +159,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     if (filterItemId) {
       const filterItem = items.find(item => item.id === filterItemId)
       if (filterItem) {
-        // If filter item is from third lens, don't filter primary items - they will be filtered by secondary items instead
-        if (thirdLens && filterItem.lens === thirdLens) {
-          // Don't filter primary items - return all primary items
-          return filtered.sort((a, b) => a.name.localeCompare(b.name))
-        }
-        
-        // Otherwise, filter to only show items related to the filter item
         // Find relationships where filterItem is involved
         const relatedRels = relationships.filter(rel => {
           return (
@@ -208,7 +188,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     }
     
     return filtered.sort((a, b) => a.name.localeCompare(b.name))
-  }, [items, primaryLens, filterItemId, relationships, thirdLens])
+  }, [items, primaryLens, filterItemId, relationships])
 
   // Get items from primary lens (for display purposes, use filteredPrimaryItems)
   const primaryItems = filteredPrimaryItems
@@ -247,51 +227,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
       let relatedItems = items.filter(item => 
         item.lens === secondaryLens && relatedItemIds.has(item.id!)
       )
-
-      // If a third lens filter item is selected, filter secondary items to only show:
-      // 1. Items related to the filter item
-      // 2. Items with no relationships to any third lens items
-      if (filterItemId && thirdLens) {
-        const filterItem = items.find(item => item.id === filterItemId)
-        if (filterItem && filterItem.lens === thirdLens) {
-          // Get all third lens item IDs
-          const allThirdLensItemIds = new Set(
-            items
-              .filter(item => item.lens === thirdLens)
-              .map(item => item.id!)
-              .filter((id): id is number => id !== undefined)
-          )
-          
-          // Filter relatedItems to only include:
-          // - Items related to the filter item
-          // - Items with no relationships to any third lens items
-          relatedItems = relatedItems.filter(secondaryItem => {
-            if (!secondaryItem.id) return false
-            
-            // Check if this secondary item is related to the filter item
-            const isRelatedToFilter = relationships.some(rel => {
-              return (
-                (rel.fromItemId === secondaryItem.id && rel.toItemId === filterItemId) ||
-                (rel.toItemId === secondaryItem.id && rel.fromItemId === filterItemId)
-              )
-            })
-            
-            if (isRelatedToFilter) return true
-            
-            // Check if this secondary item has any relationships to third lens items
-            const hasThirdLensRelationships = relationships.some(rel => {
-              const otherItemId = rel.fromItemId === secondaryItem.id ? rel.toItemId : rel.fromItemId
-              return (
-                (rel.fromItemId === secondaryItem.id && allThirdLensItemIds.has(otherItemId)) ||
-                (rel.toItemId === secondaryItem.id && allThirdLensItemIds.has(otherItemId))
-              )
-            })
-            
-            // Include if it has no third lens relationships
-            return !hasThirdLensRelationships
-          })
-        }
-      }
 
       // Build roll-up maps if roll-up is enabled (used for both filtering and grouping)
       let secondaryToRollupMap: Map<number, ItemRecord[]> | null = null
@@ -408,12 +343,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
         return false
       })
 
-      // Target includes items unless relationship is planned-to-remove or item lifecycle is Divest
+      // Target includes items unless relationship is planned-to-remove
       const targetItemsWithNoStatus = dedupeItems([
         ...relatedItems.filter(item => {
           const relLifecycle = itemRelLifecycleMap.get(item.id!)
           if (relLifecycle === 'Planned to remove') return false
-          if (item.lifecycleStatus === 'Divest') return false
           return true
         }),
         ...itemsWithNoStatus.filter(item => {
@@ -564,7 +498,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
         itemRelLifecycleMap, // Include for consistency
       }
     })
-  }, [primaryItems, secondaryLens, items, relationships, primaryLens, rollupLens, rollupMode, filterItemId, thirdLens])
+  }, [primaryItems, secondaryLens, items, relationships, primaryLens, rollupLens, rollupMode])
 
   // Calculate secondary items that have no relationships to any primary items
   const unrelatedSecondaryItems = useMemo(() => {
@@ -596,104 +530,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     // Return secondary items that are NOT in the related set
     return allSecondaryItems.filter(item => item.id && !relatedSecondaryItemIds.has(item.id))
   }, [primaryLens, secondaryLens, primaryItems, items, relationships])
-
-  // Get third lens items (sorted by name)
-  // If a filter item is selected from the third lens, only show that item
-  const thirdLensItems = useMemo(() => {
-    if (!thirdLens) return []
-    let thirdLensItemsList = items
-      .filter(item => item.lens === thirdLens)
-      .sort((a, b) => a.name.localeCompare(b.name))
-    
-    // If filter item is from third lens, only show that item
-    if (filterItemId) {
-      const filterItem = items.find(item => item.id === filterItemId)
-      if (filterItem && filterItem.lens === thirdLens) {
-        thirdLensItemsList = [filterItem]
-      }
-    }
-    
-    return thirdLensItemsList
-  }, [thirdLens, items, filterItemId])
-
-  // Map of secondary item ID to set of third lens item IDs it's related to
-  const secondaryToThirdLensMap = useMemo(() => {
-    if (!thirdLens || thirdLensItems.length === 0) return new Map<number, Set<number>>()
-    
-    const map = new Map<number, Set<number>>()
-    const thirdLensItemIds = new Set(thirdLensItems.map(item => item.id!).filter((id): id is number => id !== undefined))
-    
-    // For each secondary item, find relationships to third lens items
-    items
-      .filter(item => item.lens === secondaryLens && item.id !== undefined)
-      .forEach(secondaryItem => {
-        const relatedThirdLensIds = new Set<number>()
-        
-        relationships.forEach(rel => {
-          let thirdLensItemId: number | null = null
-          let secondaryItemId: number | null = null
-          
-          // Check if this relationship connects secondaryItem to a third lens item
-          if (rel.fromItemId === secondaryItem.id && thirdLensItemIds.has(rel.toItemId)) {
-            thirdLensItemId = rel.toItemId
-            secondaryItemId = rel.fromItemId
-          } else if (rel.toItemId === secondaryItem.id && thirdLensItemIds.has(rel.fromItemId)) {
-            thirdLensItemId = rel.fromItemId
-            secondaryItemId = rel.toItemId
-          }
-          
-          if (thirdLensItemId !== null && secondaryItemId !== null) {
-            relatedThirdLensIds.add(thirdLensItemId)
-          }
-        })
-        
-        if (relatedThirdLensIds.size > 0) {
-          map.set(secondaryItem.id!, relatedThirdLensIds)
-        }
-      })
-    
-    return map
-  }, [thirdLens, thirdLensItems, secondaryLens, items, relationships])
-
-  // Map of secondary item ID to map of third lens item ID to relationship lifecycle status
-  // This allows us to check relationship lifecycle per third lens item
-  const secondaryToThirdLensLifecycleMap = useMemo(() => {
-    if (!thirdLens || thirdLensItems.length === 0) return new Map<number, Map<number, RelationshipLifecycleStatus | undefined>>()
-    
-    const map = new Map<number, Map<number, RelationshipLifecycleStatus | undefined>>()
-    const thirdLensItemIds = new Set(thirdLensItems.map(item => item.id!).filter((id): id is number => id !== undefined))
-    
-    // For each secondary item, find relationships to third lens items with their lifecycle status
-    items
-      .filter(item => item.lens === secondaryLens && item.id !== undefined)
-      .forEach(secondaryItem => {
-        const thirdLensLifecycleMap = new Map<number, RelationshipLifecycleStatus | undefined>()
-        
-        relationships.forEach(rel => {
-          let thirdLensItemId: number | null = null
-          let secondaryItemId: number | null = null
-          
-          // Check if this relationship connects secondaryItem to a third lens item
-          if (rel.fromItemId === secondaryItem.id && thirdLensItemIds.has(rel.toItemId)) {
-            thirdLensItemId = rel.toItemId
-            secondaryItemId = rel.fromItemId
-          } else if (rel.toItemId === secondaryItem.id && thirdLensItemIds.has(rel.fromItemId)) {
-            thirdLensItemId = rel.fromItemId
-            secondaryItemId = rel.toItemId
-          }
-          
-          if (thirdLensItemId !== null && secondaryItemId !== null) {
-            thirdLensLifecycleMap.set(thirdLensItemId, rel.lifecycleStatus)
-          }
-        })
-        
-        if (thirdLensLifecycleMap.size > 0) {
-          map.set(secondaryItem.id!, thirdLensLifecycleMap)
-        }
-      })
-    
-    return map
-  }, [thirdLens, thirdLensItems, secondaryLens, items, relationships])
 
   // Get color for inner boxes using theme colors
   // Color groups: (Error, Divest), (Success, Invest), (Info, Plan), (Primary, Default), (Warning, Emerging)
@@ -765,65 +601,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
   // Get outline classes (keep outline classes, override color with inline style)
   const getOutlineClasses = (): string => {
     return 'outline outline-2 outline-offset-[-1px]'
-  }
-
-  // Helper function to format people information
-  const getPeopleText = (item: ItemRecord): string => {
-    const people: string[] = []
-    if (item.businessContact) people.push(item.businessContact)
-    if (item.techContact) people.push(item.techContact)
-    if (item.primaryArchitect) people.push(item.primaryArchitect)
-    return people.join(', ') || ''
-  }
-
-  // Helper function to get relationship text for a secondary item with a primary item
-  const getRelationshipText = (secondaryItem: ItemRecord, primaryItemId: number | undefined): string => {
-    if (!secondaryItem.id || !primaryItemId) return ''
-    
-    // Find relationships between the secondary item and primary item
-    const rels = relationships.filter(rel => {
-      return (
-        (rel.fromItemId === secondaryItem.id && rel.toItemId === primaryItemId) ||
-        (rel.toItemId === secondaryItem.id && rel.fromItemId === primaryItemId)
-      )
-    })
-    
-    if (rels.length === 0) return ''
-    
-    // Format each relationship: side label (note) [lifecycle] with deduping and skipping Default with no note
-    const relTexts = rels.map(rel => {
-      const type = rel.relationshipType || 'Default'
-      const note = rel.note || ''
-      const lifecycle =
-        rel.lifecycleStatus && rel.lifecycleStatus !== 'Existing'
-          ? ` – ${rel.lifecycleStatus}`
-          : ''
-
-      // Determine which side of the relationship the secondary item is on
-      let sideLabel: string
-      if (rel.fromItemId === secondaryItem.id) {
-        // Secondary item is on the "from" side
-        sideLabel = rel.fromItemIdRelationshipType || getRelationshipSides(type).from
-      } else {
-        // Secondary item is on the "to" side
-        sideLabel = rel.toItemIdRelationshipType || getRelationshipSides(type).to
-      }
-
-      // If side label is Default and there's no note, skip showing it
-      if (sideLabel === 'Default' && !note) return ''
-
-      // If side label is Default but note exists, just show the note
-      if (sideLabel === 'Default') return `${note}${lifecycle}`
-
-      // Otherwise show side label with optional note
-      const base = note ? `${sideLabel} (${note})` : sideLabel
-      return `${base}${lifecycle}`
-    }).filter(text => text)
-
-    // Deduplicate identical entries
-    const uniqueTexts = Array.from(new Set(relTexts))
-    
-    return uniqueTexts.join('; ')
   }
 
   const getLifecycleLabel = (status?: LifecycleStatus): string => {
@@ -1219,42 +996,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                     minor.textContent = line
                     svg.appendChild(minor)
                   })
-                } else if (minorTextOption === 'people' && getPeopleText(group.rollupItem)) {
-                  const peopleText = getPeopleText(group.rollupItem)
-                  const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
-                  peopleLines.forEach((line, idx) => {
-                    const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                    minor.setAttribute('x', String(boxX + boxWidth / 2))
-                    minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                    minor.setAttribute('class', 'item-minor')
-                    minor.setAttribute('text-anchor', 'middle')
-                    minor.textContent = line
-                    svg.appendChild(minor)
-                  })
-                } else if (minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(group.rollupItem, primaryItem.id)) {
-                  const relText = getRelationshipText(group.rollupItem, primaryItem.id)
-                  const relLines = wrapText(relText, boxWidth - 8, 8)
-                  relLines.forEach((line, idx) => {
-                    const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                    minor.setAttribute('x', String(boxX + boxWidth / 2))
-                    minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                    minor.setAttribute('class', 'item-minor')
-                    minor.setAttribute('text-anchor', 'middle')
-                    minor.textContent = line
-                    svg.appendChild(minor)
-                  })
-                } else if (minorTextOption === 'skillsGaps' && group.rollupItem.skillsGaps) {
-                  const skillsGapsText = group.rollupItem.skillsGaps
-                  const skillsGapsLines = wrapText(skillsGapsText, boxWidth - 8, 8)
-                  skillsGapsLines.forEach((line, idx) => {
-                    const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                    minor.setAttribute('x', String(boxX + boxWidth / 2))
-                    minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                    minor.setAttribute('class', 'item-minor')
-                    minor.setAttribute('text-anchor', 'middle')
-                    minor.textContent = line
-                    svg.appendChild(minor)
-                  })
                 }
               }
               
@@ -1304,18 +1045,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 } else if (minorTextOption === 'description' && group.rollupItem.description) {
                   const descLines = wrapText(group.rollupItem.description, boxWidth - 8, 8)
                   descLines.forEach((line, idx) => {
-                    const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                    minor.setAttribute('x', String(boxX + boxWidth / 2))
-                    minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                    minor.setAttribute('class', 'item-minor')
-                    minor.setAttribute('text-anchor', 'middle')
-                    minor.textContent = line
-                    svg.appendChild(minor)
-                  })
-                } else if (minorTextOption === 'people' && getPeopleText(group.rollupItem)) {
-                  const peopleText = getPeopleText(group.rollupItem)
-                  const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
-                  peopleLines.forEach((line, idx) => {
                     const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
                     minor.setAttribute('x', String(boxX + boxWidth / 2))
                     minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
@@ -1427,42 +1156,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                   minor.textContent = line
                   svg.appendChild(minor)
                 })
-              } else if (minorTextOption === 'people' && getPeopleText(item)) {
-                const peopleText = getPeopleText(item)
-                const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
-                peopleLines.forEach((line, idx) => {
-                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                  minor.setAttribute('x', String(boxX + boxWidth / 2))
-                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                  minor.setAttribute('class', 'item-minor')
-                  minor.setAttribute('text-anchor', 'middle')
-                  minor.textContent = line
-                  svg.appendChild(minor)
-                })
-              } else if (minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id)) {
-                const relText = getRelationshipText(item, primaryItem.id)
-                const relLines = wrapText(relText, boxWidth - 8, 8)
-                relLines.forEach((line, idx) => {
-                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                  minor.setAttribute('x', String(boxX + boxWidth / 2))
-                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                  minor.setAttribute('class', 'item-minor')
-                  minor.setAttribute('text-anchor', 'middle')
-                  minor.textContent = line
-                  svg.appendChild(minor)
-                })
-              } else if (minorTextOption === 'skillsGaps' && item.skillsGaps) {
-                const skillsGapsText = item.skillsGaps
-                const skillsGapsLines = wrapText(skillsGapsText, boxWidth - 8, 8)
-                skillsGapsLines.forEach((line, idx) => {
-                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                  minor.setAttribute('x', String(boxX + boxWidth / 2))
-                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                  minor.setAttribute('class', 'item-minor')
-                  minor.setAttribute('text-anchor', 'middle')
-                  minor.textContent = line
-                  svg.appendChild(minor)
-                })
               }
             })
             }
@@ -1514,18 +1207,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               } else if (minorTextOption === 'description' && item.description) {
                 const descLines = wrapText(item.description, boxWidth - 8, 8)
                 descLines.forEach((line, idx) => {
-                  const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                  minor.setAttribute('x', String(boxX + boxWidth / 2))
-                  minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                  minor.setAttribute('class', 'item-minor')
-                  minor.setAttribute('text-anchor', 'middle')
-                  minor.textContent = line
-                  svg.appendChild(minor)
-                })
-              } else if (minorTextOption === 'people' && getPeopleText(item)) {
-                const peopleText = getPeopleText(item)
-                const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
-                peopleLines.forEach((line, idx) => {
                   const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
                   minor.setAttribute('x', String(boxX + boxWidth / 2))
                   minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
@@ -1730,30 +1411,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               minor.textContent = line
               svg.appendChild(minor)
             })
-          } else if (minorTextOption === 'people' && getPeopleText(item)) {
-            const peopleText = getPeopleText(item)
-            const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
-            peopleLines.forEach((line, idx) => {
-              const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-              minor.setAttribute('x', String(boxX + boxWidth / 2))
-              minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-              minor.setAttribute('class', 'item-minor')
-              minor.setAttribute('text-anchor', 'middle')
-              minor.textContent = line
-              svg.appendChild(minor)
-            })
-          } else if (minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id)) {
-            const relText = getRelationshipText(item, primaryItem.id)
-            const relLines = wrapText(relText, boxWidth - 8, 8)
-            relLines.forEach((line, idx) => {
-              const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-              minor.setAttribute('x', String(boxX + boxWidth / 2))
-              minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-              minor.setAttribute('class', 'item-minor')
-              minor.setAttribute('text-anchor', 'middle')
-              minor.textContent = line
-              svg.appendChild(minor)
-            })
           }
         })
         }
@@ -1936,29 +1593,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               minor.setAttribute('text-anchor', 'middle')
               minor.textContent = getLifecycleLabel(item.lifecycleStatus)
               svg.appendChild(minor)
-            } else if (minorTextOption === 'description' && item.description) {
-              const descLines = wrapText(item.description, boxWidth - 8, 8)
-              descLines.forEach((line, idx) => {
-                const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                minor.setAttribute('x', String(boxX + boxWidth / 2))
-                minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                minor.setAttribute('class', 'item-minor')
-                minor.setAttribute('text-anchor', 'middle')
-                minor.textContent = line
-                svg.appendChild(minor)
-              })
-            } else if (minorTextOption === 'people' && getPeopleText(item)) {
-              const peopleText = getPeopleText(item)
-              const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
-              peopleLines.forEach((line, idx) => {
-                const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                minor.setAttribute('x', String(boxX + boxWidth / 2))
-                minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                minor.setAttribute('class', 'item-minor')
-                minor.setAttribute('text-anchor', 'middle')
-                minor.textContent = line
-                svg.appendChild(minor)
-              })
             }
           })
         }
@@ -2008,29 +1642,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
               minor.setAttribute('text-anchor', 'middle')
               minor.textContent = getLifecycleLabel(item.lifecycleStatus)
               svg.appendChild(minor)
-            } else if (minorTextOption === 'description' && item.description) {
-              const descLines = wrapText(item.description, boxWidth - 8, 8)
-              descLines.forEach((line, idx) => {
-                const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                minor.setAttribute('x', String(boxX + boxWidth / 2))
-                minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                minor.setAttribute('class', 'item-minor')
-                minor.setAttribute('text-anchor', 'middle')
-                minor.textContent = line
-                svg.appendChild(minor)
-              })
-            } else if (minorTextOption === 'people' && getPeopleText(item)) {
-              const peopleText = getPeopleText(item)
-              const peopleLines = wrapText(peopleText, boxWidth - 8, 8)
-              peopleLines.forEach((line, idx) => {
-                const minor = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-                minor.setAttribute('x', String(boxX + boxWidth / 2))
-                minor.setAttribute('y', String(boxY + 12 + nameLines.length * 11 + 4 + idx * 9))
-                minor.setAttribute('class', 'item-minor')
-                minor.setAttribute('text-anchor', 'middle')
-                minor.textContent = line
-                svg.appendChild(minor)
-              })
             }
           })
         }
@@ -2194,12 +1805,8 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     })
   }, [itemAnalysis])
 
-  // Get grid columns class based on view mode and third lens
+  // Get grid columns class based on view mode
   const getGridColsClass = (): string => {
-    if (thirdLens && thirdLensItems.length > 0) {
-      // When third lens is active, use number of third lens items as columns
-      return `grid-cols-${thirdLensItems.length}`
-    }
     if (hasAnyLifecycleStatus && columnViewMode !== 'both') {
       // Single column mode (Current or Target only) - use more columns to fill the width
       return 'grid-cols-5'
@@ -2212,197 +1819,9 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     return 'grid-cols-3'
   }
 
-  // Get relationships for a secondary item to third lens items
-  const getThirdLensRelationships = (secondaryItemId: number): Set<number> => {
-    return secondaryToThirdLensMap.get(secondaryItemId) || new Set<number>()
-  }
-
-  // Get relationships for a secondary item to third lens items, filtered by column (Current or Target)
-  // Current: excludes relationships with "Planned to add" lifecycle
-  // Target: excludes relationships with "Planned to remove" lifecycle
-  const getThirdLensRelationshipsForColumn = (secondaryItemId: number, column: 'current' | 'target'): Set<number> => {
-    const lifecycleMap = secondaryToThirdLensLifecycleMap.get(secondaryItemId)
-    if (!lifecycleMap) return new Set<number>()
-    
-    const filteredIds = new Set<number>()
-    lifecycleMap.forEach((lifecycleStatus, thirdLensItemId) => {
-      if (column === 'current') {
-        // Current: exclude "Planned to add"
-        if (lifecycleStatus !== 'Planned to add') {
-          filteredIds.add(thirdLensItemId)
-        }
-      } else {
-        // Target: exclude "Planned to remove"
-        if (lifecycleStatus !== 'Planned to remove') {
-          filteredIds.add(thirdLensItemId)
-        }
-      }
-    })
-    
-    return filteredIds
-  }
-
-  // Render a single item with third lens support
-  const renderItemWithThirdLens = (
-    item: ItemRecord,
-    isHighlighted: boolean,
-    highlightClass: string,
-    onMouseEnter: () => void,
-    onMouseLeave: () => void,
-    onClick: () => void,
-    column?: 'current' | 'target', // Optional: filter by column (Current excludes "Planned to add", Target excludes "Planned to remove")
-    primaryItemId?: number // Optional: primary item ID for relationship display
-  ) => {
-    if (!thirdLens || thirdLensItems.length === 0 || !item.id) {
-      // No third lens - render normally
-      return (
-        <div
-          key={item.id}
-          className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-          style={{
-            ...getHighlightedItemColor(item),
-            ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-            borderStyle: 'solid',
-            borderWidth: '1px',
-          }}
-          onMouseEnter={onMouseEnter}
-          onMouseLeave={onMouseLeave}
-          onClick={onClick}
-        >
-          <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-            {item.name}
-          </div>
-          {minorTextOption === 'description' && item.description && (
-            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-              {item.description}
-            </div>
-          )}
-          {minorTextOption === 'lifecycle' && (
-            <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-              {getLifecycleLabel(item.lifecycleStatus)}
-            </div>
-          )}
-          {minorTextOption === 'people' && getPeopleText(item) && (
-            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-              {getPeopleText(item)}
-            </div>
-          )}
-          {minorTextOption === 'relationships' && primaryItemId && getRelationshipText(item, primaryItemId) && (
-            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-              {getRelationshipText(item, primaryItemId)}
-            </div>
-          )}
-          {minorTextOption === 'skillsGaps' && item.skillsGaps && (
-            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-              {item.skillsGaps}
-            </div>
-          )}
-        </div>
-      )
-    }
-
-    // Use column-filtered relationships if column is specified, otherwise use all relationships
-    const relatedThirdLensIds = column 
-      ? getThirdLensRelationshipsForColumn(item.id, column)
-      : getThirdLensRelationships(item.id)
-    const allThirdLensIds = new Set(thirdLensItems.map(i => i.id!).filter((id): id is number => id !== undefined))
-    
-    // If not related to any or related to all, span all columns
-    if (relatedThirdLensIds.size === 0 || relatedThirdLensIds.size === allThirdLensIds.size) {
-      return (
-        <div
-          key={item.id}
-          className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-          style={{
-            ...getHighlightedItemColor(item),
-            ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-            borderStyle: 'solid',
-            borderWidth: '1px',
-            gridColumn: `1 / -1`,
-          }}
-          onMouseEnter={onMouseEnter}
-          onMouseLeave={onMouseLeave}
-          onClick={onClick}
-        >
-          <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-            {item.name}
-          </div>
-          {minorTextOption === 'description' && item.description && (
-            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-              {item.description}
-            </div>
-          )}
-          {minorTextOption === 'lifecycle' && (
-            <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-              {getLifecycleLabel(item.lifecycleStatus)}
-            </div>
-          )}
-          {minorTextOption === 'people' && getPeopleText(item) && (
-            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-              {getPeopleText(item)}
-            </div>
-          )}
-        </div>
-      )
-    }
-
-    // Related to some - render only in matching columns (colored)
-    return thirdLensItems.map((thirdLensItem, colIndex) => {
-      const isRelated = thirdLensItem.id && relatedThirdLensIds.has(thirdLensItem.id)
-      if (!isRelated) {
-        // Empty cell for non-matching columns
-        return <div key={`${item.id}-${thirdLensItem.id || colIndex}-empty`} />
-      }
-      return (
-        <div
-          key={`${item.id}-${thirdLensItem.id || colIndex}`}
-          className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-          style={{
-            ...getHighlightedItemColor(item),
-            ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-            borderStyle: 'solid',
-            borderWidth: '1px',
-          }}
-          onMouseEnter={onMouseEnter}
-          onMouseLeave={onMouseLeave}
-          onClick={onClick}
-        >
-          <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-            {item.name}
-          </div>
-          {minorTextOption === 'description' && item.description && (
-            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-              {item.description}
-            </div>
-          )}
-          {minorTextOption === 'lifecycle' && (
-            <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-              {getLifecycleLabel(item.lifecycleStatus)}
-            </div>
-          )}
-          {minorTextOption === 'people' && getPeopleText(item) && (
-            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-              {getPeopleText(item)}
-            </div>
-          )}
-          {minorTextOption === 'relationships' && primaryItemId && getRelationshipText(item, primaryItemId) && (
-            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-              {getRelationshipText(item, primaryItemId)}
-            </div>
-          )}
-          {minorTextOption === 'skillsGaps' && item.skillsGaps && (
-            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-              {item.skillsGaps}
-            </div>
-          )}
-        </div>
-      )
-    })
-  }
-
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
-      <div className="flex-shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+      <div className="sticky top-0 z-10 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
         <div className="p-2 sm:p-3">
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
             <h1 className="text-lg sm:text-xl font-semibold shrink-0">Target View</h1>
@@ -2438,19 +1857,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 >
                   <option value="">Select...</option>
                   {lenses.filter(l => l.key !== primaryLens).map(lens => (
-                    <option key={lens.key} value={lens.key}>{lens.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center gap-1 shrink-0">
-                <span className="text-xs whitespace-nowrap">Third:</span>
-                <select
-                  value={thirdLens}
-                  onChange={e => setThirdLens(e.target.value as LensKey)}
-                  className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 min-w-0"
-                >
-                  <option value="">None</option>
-                  {lenses.filter(l => l.key !== primaryLens && l.key !== secondaryLens).map(lens => (
                     <option key={lens.key} value={lens.key}>{lens.label}</option>
                   ))}
                 </select>
@@ -2517,7 +1923,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                     className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 w-full sm:w-40 min-w-0"
                   />
                   {filterItemQuery.trim() && !selectedFilterItem && filterItemOptions.length > 0 && (
-                    <div className="absolute z-50 mt-1 w-full sm:w-64 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded shadow-lg max-h-60 overflow-y-auto">
+                    <div className="absolute z-10 mt-1 w-full sm:w-64 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded shadow-lg max-h-60 overflow-y-auto">
                       {filterItemOptions.map(option => (
                         <button
                           key={option.id}
@@ -2557,15 +1963,12 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                 <span className="text-xs whitespace-nowrap">Minor:</span>
                 <select
                   value={minorTextOption}
-                  onChange={e => setMinorTextOption(e.target.value as 'none' | 'lifecycle' | 'description' | 'people' | 'relationships' | 'skillsGaps')}
+                  onChange={e => setMinorTextOption(e.target.value as 'none' | 'lifecycle' | 'description')}
                   className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 min-w-0"
                 >
                   <option value="none">None</option>
                   <option value="lifecycle">Status</option>
                   <option value="description">Desc</option>
-                  <option value="people">People</option>
-                  <option value="relationships">Relationships</option>
-                  <option value="skillsGaps">Skills Gaps</option>
                 </select>
               </label>
               {primaryLens && secondaryLens && unrelatedSecondaryItems.length > 0 && (
@@ -2583,166 +1986,48 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
           </div>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-3 pb-3">
+      <div className="flex-1 overflow-y-auto p-3">
         {primaryLens && secondaryLens ? (
           itemAnalysis.length > 0 ? (
             <div ref={contentRef} className="max-w-7xl mx-auto">
               {/* Column headers */}
-              {thirdLens && thirdLensItems.length > 0 ? (
-                <>
-                  {/* Main header row */}
-                  <div 
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: (() => {
-                        if (!hasAnyLifecycleStatus) return `200px repeat(${thirdLensItems.length}, 1fr)`
-                        if (columnViewMode === 'both') return `200px repeat(${thirdLensItems.length}, 1fr) repeat(${thirdLensItems.length}, 1fr)`
-                        return `200px repeat(${thirdLensItems.length}, 1fr)`
-                      })(),
-                      gap: '0.75rem'
-                    }}
-                    className="sticky top-0 z-20 bg-white dark:bg-slate-900 pb-1 pt-1 px-3 -mx-3 border-b-2 border-slate-300 dark:border-slate-700"
-                  >
-                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                      {LENSES.find(l => l.key === primaryLens)?.label || primaryLens}
-                    </div>
-                    {hasAnyLifecycleStatus ? (
+              <div className={`grid ${(() => {
+                if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
+                if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
+                return 'grid-cols-[200px_1fr]'
+              })()} gap-3 mb-2 pb-2 border-b-2 border-slate-300 dark:border-slate-700`}>
+                <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                  {LENSES.find(l => l.key === primaryLens)?.label || primaryLens}
+                </div>
+                {hasAnyLifecycleStatus ? (
+                  <>
+                    {columnViewMode === 'both' && (
                       <>
-                        {columnViewMode === 'both' && (
-                          <>
-                            <div 
-                              style={{ gridColumn: `span ${thirdLensItems.length}` }}
-                              className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center"
-                            >
-                              Current
-                            </div>
-                            <div 
-                              style={{ gridColumn: `span ${thirdLensItems.length}` }}
-                              className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center"
-                            >
-                              Target
-                            </div>
-                          </>
-                        )}
-                        {columnViewMode === 'current' && (
-                          <div 
-                            style={{ gridColumn: `span ${thirdLensItems.length}` }}
-                            className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center"
-                          >
-                            Current
-                          </div>
-                        )}
-                        {columnViewMode === 'target' && (
-                          <div 
-                            style={{ gridColumn: `span ${thirdLensItems.length}` }}
-                            className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center"
-                          >
-                            Target
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div 
-                        style={{ gridColumn: `span ${thirdLensItems.length}` }}
-                        className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center"
-                      >
-                        {LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens}
-                      </div>
-                    )}
-                  </div>
-                  {/* Third lens item names as column headers */}
-                  <div 
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: (() => {
-                        if (!hasAnyLifecycleStatus) return `200px repeat(${thirdLensItems.length}, 1fr)`
-                        if (columnViewMode === 'both') return `200px repeat(${thirdLensItems.length}, 1fr) repeat(${thirdLensItems.length}, 1fr)`
-                        return `200px repeat(${thirdLensItems.length}, 1fr)`
-                      })(),
-                      gap: '0.75rem'
-                    }}
-                    className="sticky top-[1.75rem] z-20 bg-white dark:bg-slate-900 pb-2 pt-1 px-3 -mx-3 border-b-2 border-slate-300 dark:border-slate-700"
-                  >
-                    <div></div>
-                    {hasAnyLifecycleStatus ? (
-                      <>
-                        {columnViewMode === 'both' && (
-                          <>
-                            {thirdLensItems.map(item => (
-                              <div key={`current-header-${item.id}`} className="text-xs text-slate-600 dark:text-slate-400 text-center">
-                                {item.name}
-                              </div>
-                            ))}
-                            {thirdLensItems.map(item => (
-                              <div key={`target-header-${item.id}`} className="text-xs text-slate-600 dark:text-slate-400 text-center">
-                                {item.name}
-                              </div>
-                            ))}
-                          </>
-                        )}
-                        {columnViewMode === 'current' && (
-                          thirdLensItems.map(item => (
-                            <div key={item.id} className="text-xs text-slate-600 dark:text-slate-400 text-center">
-                              {item.name}
-                            </div>
-                          ))
-                        )}
-                        {columnViewMode === 'target' && (
-                          thirdLensItems.map(item => (
-                            <div key={item.id} className="text-xs text-slate-600 dark:text-slate-400 text-center">
-                              {item.name}
-                            </div>
-                          ))
-                        )}
-                      </>
-                    ) : (
-                      thirdLensItems.map(item => (
-                        <div key={item.id} className="text-xs text-slate-600 dark:text-slate-400 text-center">
-                          {item.name}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className={`grid ${(() => {
-                  if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
-                  if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
-                  return 'grid-cols-[200px_1fr]'
-                })()} sticky top-0 z-20 bg-white dark:bg-slate-900 gap-3 mb-2 pb-2 pt-2 px-3 -mx-3 border-b-2 border-slate-300 dark:border-slate-700`}>
-                  <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                    {LENSES.find(l => l.key === primaryLens)?.label || primaryLens}
-                  </div>
-                  {hasAnyLifecycleStatus ? (
-                    <>
-                      {columnViewMode === 'both' && (
-                        <>
-                          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
-                            Current
-                          </div>
-                          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
-                            Target
-                          </div>
-                        </>
-                      )}
-                      {columnViewMode === 'current' && (
                         <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
                           Current
                         </div>
-                      )}
-                      {columnViewMode === 'target' && (
                         <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
                           Target
                         </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
-                      {LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens}
-                    </div>
-                  )}
-                </div>
-              )}
+                      </>
+                    )}
+                    {columnViewMode === 'current' && (
+                      <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                        Current
+                      </div>
+                    )}
+                    {columnViewMode === 'target' && (
+                      <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                        Target
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                    {LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens}
+                  </div>
+                )}
+              </div>
               
               {/* Rows grouped by parent */}
               <div className="space-y-2">
@@ -2795,32 +2080,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                             return (
                               <div
                                 key={primaryItem.id}
-                                style={(() => {
-                                  if (thirdLens && thirdLensItems.length > 0) {
-                                    if (!hasAnyLifecycleStatus) {
-                                      return {
-                                        display: 'grid',
-                                        gridTemplateColumns: `200px repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                                        gap: '0.75rem',
-                                      }
-                                    }
-                                    if (columnViewMode === 'both') {
-                                      return {
-                                        display: 'grid',
-                                        gridTemplateColumns: `200px repeat(${thirdLensItems.length}, minmax(0, 1fr)) repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                                        gap: '0.75rem',
-                                      }
-                                    }
-                                    return {
-                                      display: 'grid',
-                                      gridTemplateColumns: `200px repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                                      gap: '0.75rem',
-                                    }
-                                  }
-                                  return {}
-                                })()}
-                                className={`${(() => {
-                                  if (thirdLens && thirdLensItems.length > 0) return ''
+                                className={`grid ${(() => {
                                   if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
                                   if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
                                   return 'grid-cols-[200px_1fr]'
@@ -2848,10 +2108,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                   <>
                                     {(columnViewMode === 'both' || columnViewMode === 'current') && (
                                       /* Middle Column: Current items from all roll-up groups */
-                                      <div 
-                                        style={(!thirdLens || thirdLensItems.length === 0) && columnViewMode === 'both' ? { gridColumn: '2' } : {}}
-                                        className={columnViewMode === 'both' && (thirdLens && thirdLensItems.length > 0) ? 'mr-6' : ''}
-                                      >
+                                      <div className={columnViewMode === 'both' ? 'mr-6' : ''}>
                                   {/* Roll-up Groups - Current Items */}
                                   <div className="space-y-3">
                                   {rollupGroups.map((group: any) => {
@@ -2923,21 +2180,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                               {minorTextOption === 'lifecycle' && (
                                                 <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
                                                   {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
-                                                </div>
-                                              )}
-                                              {minorTextOption === 'people' && getPeopleText(group.rollupItem) && (
-                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                  {getPeopleText(group.rollupItem)}
-                                                </div>
-                                              )}
-                                              {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(group.rollupItem, primaryItem.id) && (
-                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                  {getRelationshipText(group.rollupItem, primaryItem.id)}
-                                                </div>
-                                              )}
-                                              {minorTextOption === 'skillsGaps' && group.rollupItem.skillsGaps && (
-                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                  {group.rollupItem.skillsGaps}
                                                 </div>
                                               )}
                                             </div>
@@ -3094,16 +2336,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                   {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
                                                 </div>
                                               )}
-                                              {minorTextOption === 'people' && getPeopleText(group.rollupItem) && (
-                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                  {getPeopleText(group.rollupItem)}
-                                                </div>
-                                              )}
-                                              {minorTextOption === 'skillsGaps' && group.rollupItem.skillsGaps && (
-                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                  {group.rollupItem.skillsGaps}
-                                                </div>
-                                              )}
                                             </div>
                                           </div>
                                         ) : null}
@@ -3163,24 +2395,43 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).map((item: ItemRecord) => {
                                             const isHighlighted = shouldHighlightItem(item)
                                             const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                            return renderItemWithThirdLens(
-                                              item,
-                                              isHighlighted,
-                                              highlightClass,
-                                              () => {
+                                            return (
+                                            <div
+                                              key={item.id}
+                                              className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                              style={{
+                                                ...getHighlightedItemColor(item),
+                                                ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                                borderStyle: 'solid',
+                                                borderWidth: '1px',
+                                              }}
+                                              onMouseEnter={() => {
                                                 if (item.id) setHoveredItemId(item.id)
                                                 setHoveredParentName(null)
-                                              },
-                                              () => {
+                                              }}
+                                              onMouseLeave={() => {
                                                 setHoveredItemId(null)
                                                 setHoveredParentName(null)
-                                              },
-                                              () => {
+                                              }}
+                                              onClick={() => {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
-                                              },
-                                              'current', // Current column
-                                              primaryItem.id // Pass primary item ID for relationships
+                                              }}
+                                            >
+                                              <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                                {item.name}
+                                              </div>
+                                              {minorTextOption === 'description' && item.description && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {item.description}
+                                                </div>
+                                              )}
+                                              {minorTextOption === 'lifecycle' && (
+                                                <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                                  {getLifecycleLabel(item.lifecycleStatus)}
+                                                </div>
+                                              )}
+                                            </div>
                                             )
                                           })}
                                         </div>
@@ -3193,10 +2444,7 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                     
                                     {(columnViewMode === 'both' || columnViewMode === 'target') && (
                                       /* Right Column: Target items from all roll-up groups */
-                                      <div 
-                                        style={(!thirdLens || thirdLensItems.length === 0) && columnViewMode === 'both' ? { gridColumn: '3' } : {}}
-                                        className={columnViewMode === 'both' && (thirdLens && thirdLensItems.length > 0) ? 'ml-6' : ''}
-                                      >
+                                      <div className={columnViewMode === 'both' ? 'ml-6' : ''}>
                                   {/* Roll-up Groups - Target Items */}
                                   <div className="space-y-3">
                                   {rollupGroups.map((group: any) => {
@@ -3256,8 +2504,13 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           ) : hasTargetItemsOverall ? (
                                             null
                                           ) : (
-                                            <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2 text-center">
-                                              No Target items
+                                            <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                              No Target items for {primaryItem.name}
+                                              {group.divestItems.length > 0 && (
+                                                <div className="mt-1 text-[10px]">
+                                                  Current: {group.divestItems.map((item: ItemRecord) => item.name).join(', ')}
+                                                </div>
+                                              )}
                                             </div>
                                           )}
                                         </div>
@@ -3320,8 +2573,13 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           ) : hasTargetItemsOverall ? (
                                             null
                                           ) : (
-                                            <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2 text-center">
-                                              No Target items
+                                            <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                              No Target items for {primaryItem.name}
+                                              {group.divestItems.length > 0 && (
+                                                <div className="mt-1 text-[10px]">
+                                                  Current: {group.divestItems.map((item: ItemRecord) => item.name).join(', ')}
+                                                </div>
+                                              )}
                                             </div>
                                           )}
                                         </div>
@@ -3398,23 +2656,18 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                   {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
                                                 </div>
                                               )}
-                                              {minorTextOption === 'people' && getPeopleText(group.rollupItem) && (
-                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                  {getPeopleText(group.rollupItem)}
-                                                </div>
-                                              )}
-                                              {minorTextOption === 'skillsGaps' && group.rollupItem.skillsGaps && (
-                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                  {group.rollupItem.skillsGaps}
-                                                </div>
-                                              )}
                                             </div>
                                           </div>
                                         ) : hasTargetItemsOverall ? (
                                           null
                                         ) : (
                                           <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
-                                            No Target items
+                                            No Target items for {primaryItem.name}
+                                            {group.divestItems.length > 0 && (
+                                              <div className="mt-1 text-[10px]">
+                                                Current: {group.divestItems.map((item: ItemRecord) => item.name).join(', ')}
+                                              </div>
+                                            )}
                                           </div>
                                         )}
                                       </div>
@@ -3475,24 +2728,43 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                           {ungroupedSecondaryItems.filter((item: ItemRecord) => targetItems.includes(item)).map((item: ItemRecord) => {
                                             const isHighlighted = shouldHighlightItem(item)
                                             const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                            return renderItemWithThirdLens(
-                                              item,
-                                              isHighlighted,
-                                              highlightClass,
-                                              () => {
+                                            return (
+                                            <div
+                                              key={item.id}
+                                              className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                              style={{
+                                                ...getHighlightedItemColor(item),
+                                                ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                                borderStyle: 'solid',
+                                                borderWidth: '1px',
+                                              }}
+                                              onMouseEnter={() => {
                                                 if (item.id) setHoveredItemId(item.id)
                                                 setHoveredParentName(null)
-                                              },
-                                              () => {
+                                              }}
+                                              onMouseLeave={() => {
                                                 setHoveredItemId(null)
                                                 setHoveredParentName(null)
-                                              },
-                                              () => {
+                                              }}
+                                              onClick={() => {
                                                 setEditItem(item)
                                                 setEditDialogOpen(true)
-                                              },
-                                              'target', // Target column
-                                              primaryItem.id // Pass primary item ID for relationships
+                                              }}
+                                            >
+                                              <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                                {item.name}
+                                              </div>
+                                              {minorTextOption === 'description' && item.description && (
+                                                <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                  {item.description}
+                                                </div>
+                                              )}
+                                              {minorTextOption === 'lifecycle' && (
+                                                <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                                  {getLifecycleLabel(item.lifecycleStatus)}
+                                                </div>
+                                              )}
+                                            </div>
                                             )
                                           })}
                                         </div>
@@ -3500,7 +2772,12 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                         null
                                       ) : (
                                         <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
-                                          No Target items
+                                          No Target items for {primaryItem.name}
+                                          {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).length > 0 && (
+                                            <div className="mt-1 text-[10px]">
+                                              Current: {ungroupedSecondaryItems.filter((item: ItemRecord) => divestItems.includes(item)).map((item: ItemRecord) => item.name).join(', ')}
+                                            </div>
+                                          )}
                                         </div>
                                       )}
                                     </div>
@@ -3560,11 +2837,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getLifecycleLabel(group.rollupItem.lifecycleStatus)}
                                                     </div>
                                                   )}
-                                                  {minorTextOption === 'people' && getPeopleText(group.rollupItem) && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {getPeopleText(group.rollupItem)}
-                                                    </div>
-                                                  )}
                                                 </div>
                                               </div>
                                             ) : null}
@@ -3611,11 +2883,6 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                                       {getLifecycleLabel(item.lifecycleStatus)}
                                                     </div>
                                                   )}
-                                                  {minorTextOption === 'people' && getPeopleText(item) && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {getPeopleText(item)}
-                                                    </div>
-                                                  )}
                                                 </div>
                                                 )
                                               })}
@@ -3638,53 +2905,11 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                           return (
                             <div
                               key={primaryItem.id}
-                              style={(() => {
-                                if (thirdLens && thirdLensItems.length > 0) {
-                                  if (!hasAnyLifecycleStatus) {
-                                    return {
-                                      display: 'grid',
-                                      gridTemplateColumns: `200px repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                                      gap: '0.75rem',
-                                    }
-                                  }
-                                  if (columnViewMode === 'both') {
-                                    return {
-                                      display: 'grid',
-                                      gridTemplateColumns: `200px repeat(${thirdLensItems.length}, minmax(0, 1fr)) repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                                      gap: '0.75rem',
-                                    }
-                                  }
-                                  return {
-                                    display: 'grid',
-                                    gridTemplateColumns: `200px repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                                    gap: '0.75rem',
-                                  }
-                                }
-                                // When no third lens, still use inline styles for consistency
-                                if (!hasAnyLifecycleStatus) {
-                                  return {
-                                    display: 'grid',
-                                    gridTemplateColumns: '200px 1fr',
-                                    rowGap: '0.75rem',
-                                    columnGap: '0.75rem',
-                                  }
-                                }
-                                if (columnViewMode === 'both') {
-                                  return {
-                                    display: 'grid',
-                                    gridTemplateColumns: '200px 1fr 1fr',
-                                    rowGap: '0.75rem',
-                                    columnGap: '1.25rem',
-                                  }
-                                }
-                                return {
-                                  display: 'grid',
-                                  gridTemplateColumns: '200px 1fr',
-                                  rowGap: '0.75rem',
-                                  columnGap: '0.75rem',
-                                }
-                              })()}
-                              className={`gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
+                              className={`grid ${(() => {
+                                if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
+                                if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
+                                return 'grid-cols-[200px_1fr]'
+                              })()} gap-3 p-2 ${idx < groupItems.length - 1 ? 'border-b border-slate-200 dark:border-slate-700' : ''}`}
                             >
                               {/* Left: Primary Item Name */}
                               <div className="flex flex-col justify-start">
@@ -3708,459 +2933,165 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                                 <>
                                   {(columnViewMode === 'both' || columnViewMode === 'current') && (
                                     /* Middle Column: Current (Invest items with relationship lifecycle None or Divest) */
-                                    <>
+                                    <div className={columnViewMode === 'both' ? 'mr-6' : ''}>
                                     {divestItems.length > 0 ? (
-                                      thirdLens && thirdLensItems.length > 0 ? (
-                                        // Use nested grid with consistent column structure - all use same template
-                                        <div 
-                                          style={{ 
-                                            gridColumn: columnViewMode === 'both' ? `2 / ${2 + thirdLensItems.length}` : `2 / ${2 + thirdLensItems.length}`,
-                                            display: 'grid',
-                                            gridTemplateColumns: `repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                                            gap: '0.25rem',
-                                            alignContent: 'start',
-                                            width: '100%'
-                                          }}
-                                        >
-                                          {/* Items aligned with sub-columns */}
-                                          {divestItems.map((item: ItemRecord, itemRowIdx: number) => {
-                                            const isHighlighted = shouldHighlightItem(item)
-                                            const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                            // For Current column: exclude relationships with "Planned to add"
-                                            const relatedThirdLensIds = item.id ? getThirdLensRelationshipsForColumn(item.id, 'current') : new Set<number>()
-                                            const allThirdLensIds = new Set(thirdLensItems.map(i => i.id!).filter((id): id is number => id !== undefined))
-                                            
-                                            // If not related to any or related to all, span all columns
-                                            if (relatedThirdLensIds.size === 0 || relatedThirdLensIds.size === allThirdLensIds.size) {
-                                              return (
-                                                <div
-                                                  key={item.id}
-                                                  style={{
-                                                    ...getHighlightedItemColor(item),
-                                                    ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-                                                    borderStyle: 'solid',
-                                                    borderWidth: '1px',
-                                                    gridColumn: `1 / ${thirdLensItems.length + 1}`,
-                                                    gridRow: itemRowIdx + 1
-                                                  }}
-                                                  className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-                                                  onMouseEnter={() => {
-                                                    if (item.id) setHoveredItemId(item.id)
-                                                    setHoveredParentName(null)
-                                                  }}
-                                                  onMouseLeave={() => {
-                                                    setHoveredItemId(null)
-                                                    setHoveredParentName(null)
-                                                  }}
-                                                  onClick={() => {
-                                                    setEditItem(item)
-                                                    setEditDialogOpen(true)
-                                                  }}
-                                                >
-                                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                                    {item.name}
-                                                  </div>
-                                                  {minorTextOption === 'description' && item.description && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {item.description}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'lifecycle' && (
-                                                    <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                                      {getLifecycleLabel(item.lifecycleStatus)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'people' && getPeopleText(item) && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {getPeopleText(item)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id) && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {getRelationshipText(item, primaryItem.id)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'skillsGaps' && item.skillsGaps && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {item.skillsGaps}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              )
-                                            }
-                                            
-                                            // Related to some - render in specific columns
-                                            return thirdLensItems.map((thirdLensItem, colIdx) => {
-                                              const isRelated = thirdLensItem.id && relatedThirdLensIds.has(thirdLensItem.id)
-                                              if (!isRelated) {
-                                                return <div key={`${item.id}-${thirdLensItem.id || colIdx}-empty`} style={{ gridRow: itemRowIdx + 1 }} />
-                                              }
-                                              return (
-                                                <div
-                                                  key={`${item.id}-${thirdLensItem.id || colIdx}`}
-                                                  style={{
-                                                    ...getHighlightedItemColor(item),
-                                                    ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-                                                    borderStyle: 'solid',
-                                                    borderWidth: '1px',
-                                                    gridColumn: colIdx + 1,
-                                                    gridRow: itemRowIdx + 1
-                                                  }}
-                                                  className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-                                                  onMouseEnter={() => {
-                                                    if (item.id) setHoveredItemId(item.id)
-                                                    setHoveredParentName(null)
-                                                  }}
-                                                  onMouseLeave={() => {
-                                                    setHoveredItemId(null)
-                                                    setHoveredParentName(null)
-                                                  }}
-                                                  onClick={() => {
-                                                    setEditItem(item)
-                                                    setEditDialogOpen(true)
-                                                  }}
-                                                >
-                                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                                    {item.name}
-                                                  </div>
-                                                  {minorTextOption === 'description' && item.description && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {item.description}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'lifecycle' && (
-                                                    <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                                      {getLifecycleLabel(item.lifecycleStatus)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'people' && getPeopleText(item) && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {getPeopleText(item)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id) && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {getRelationshipText(item, primaryItem.id)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'skillsGaps' && item.skillsGaps && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {item.skillsGaps}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              )
-                                            })
-                                          })}
-                                        </div>
-                                      ) : (
-                                        // Use dynamic grid (up to 5 cols, stretch to fill) when no third lens
-                                        <div 
-                                          style={columnViewMode === 'both' ? { 
-                                            gridColumn: '2',
-                                            display: 'grid',
-                                            gridTemplateColumns: `repeat(${Math.max(1, Math.min(divestItems.length, 3))}, minmax(0, 1fr))`,
-                                            gap: '0.25rem'
-                                          } : {}}
-                                          className={columnViewMode === 'both' ? '' : `grid ${getGridColsClass()} gap-1`}
-                                        >
-                                          {divestItems.map((item: ItemRecord) => {
-                                            const isHighlighted = shouldHighlightItem(item)
-                                            const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                            return renderItemWithThirdLens(
-                                              item,
-                                              isHighlighted,
-                                              highlightClass,
-                                              () => {
-                                                if (item.id) setHoveredItemId(item.id)
-                                                setHoveredParentName(null)
-                                              },
-                                              () => {
-                                                setHoveredItemId(null)
-                                                setHoveredParentName(null)
-                                              },
-                                              () => {
-                                                setEditItem(item)
-                                                setEditDialogOpen(true)
-                                              },
-                                              'current', // Filter for Current column
-                                              primaryItem.id // Pass primary item ID for relationships
-                                            )
-                                          })}
-                                        </div>
-                                      )
+                                      <div className={`grid ${getGridColsClass()} gap-1`}>
+                                        {divestItems.map((item: ItemRecord) => {
+                                          const isHighlighted = shouldHighlightItem(item)
+                                          const highlightClass = isHighlighted ? getOutlineClasses() : ''
+                                          return (
+                                          <div
+                                            key={item.id}
+                                            className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                            style={{
+                                              ...getHighlightedItemColor(item),
+                                              ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                            }}
+                                            onMouseEnter={() => {
+                                              if (item.id) setHoveredItemId(item.id)
+                                              setHoveredParentName(null)
+                                            }}
+                                            onMouseLeave={() => {
+                                              setHoveredItemId(null)
+                                              setHoveredParentName(null)
+                                            }}
+                                            onClick={() => {
+                                              setEditItem(item)
+                                              setEditDialogOpen(true)
+                                            }}
+                                          >
+                                            <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                              {item.name}
+                                            </div>
+                                            {minorTextOption === 'description' && item.description && (
+                                              <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                {item.description}
+                                              </div>
+                                            )}
+                                            {minorTextOption === 'lifecycle' && (
+                                              <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                                {getLifecycleLabel(item.lifecycleStatus)}
+                                              </div>
+                                            )}
+                                          </div>
+                                          )
+                                        })}
+                                      </div>
                                     ) : (
-                                      <div 
-                                        style={columnViewMode === 'both' ? { gridColumn: '2' } : {}}
-                                        className="text-xs text-slate-500 dark:text-slate-400 italic py-2 text-center"
-                                      >
-                                        No Current items
+                                      <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                        No items in Current column
                                       </div>
                                     )}
-                                  </>
+                                  </div>
                                   )}
                                   
                                   {(columnViewMode === 'both' || columnViewMode === 'target') && (
                                     /* Right Column: Target (Replacement Items + Other Items + No Status) */
-                                    <>
+                                    <div className={columnViewMode === 'both' ? 'ml-6' : ''}>
                                     {targetItems.length > 0 ? (
-                                      thirdLens && thirdLensItems.length > 0 ? (
-                                        // Use nested grid with consistent column structure - all use same template
-                                        <div 
-                                          style={{ 
-                                            gridColumn: columnViewMode === 'both' ? `${2 + thirdLensItems.length} / ${2 + 2 * thirdLensItems.length}` : `2 / ${2 + thirdLensItems.length}`,
-                                            display: 'grid',
-                                            gridTemplateColumns: `repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                                            gap: '0.25rem',
-                                            alignContent: 'start',
-                                            width: '100%'
-                                          }}
-                                        >
-                                          {/* Items aligned with sub-columns */}
-                                          {targetItems.map((item: ItemRecord, itemRowIdx: number) => {
-                                            const isHighlighted = shouldHighlightItem(item)
-                                            const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                            // For Target column: exclude relationships with "Planned to remove"
-                                            const relatedThirdLensIds = item.id ? getThirdLensRelationshipsForColumn(item.id, 'target') : new Set<number>()
-                                            const allThirdLensIds = new Set(thirdLensItems.map(i => i.id!).filter((id): id is number => id !== undefined))
-                                            
-                                            // If not related to any or related to all, span all columns
-                                            if (relatedThirdLensIds.size === 0 || relatedThirdLensIds.size === allThirdLensIds.size) {
-                                              return (
-                                                <div
-                                                  key={item.id}
-                                                  style={{
-                                                    ...getHighlightedItemColor(item),
-                                                    ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-                                                    borderStyle: 'solid',
-                                                    borderWidth: '1px',
-                                                    gridColumn: `1 / ${thirdLensItems.length + 1}`,
-                                                    gridRow: itemRowIdx + 1
-                                                  }}
-                                                  className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-                                                  onMouseEnter={() => {
-                                                    if (item.id) setHoveredItemId(item.id)
-                                                    setHoveredParentName(null)
-                                                  }}
-                                                  onMouseLeave={() => {
-                                                    setHoveredItemId(null)
-                                                    setHoveredParentName(null)
-                                                  }}
-                                                  onClick={() => {
-                                                    setEditItem(item)
-                                                    setEditDialogOpen(true)
-                                                  }}
-                                                >
-                                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                                    {item.name}
-                                                  </div>
-                                                  {minorTextOption === 'description' && item.description && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {item.description}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'lifecycle' && (
-                                                    <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                                      {getLifecycleLabel(item.lifecycleStatus)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'people' && getPeopleText(item) && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {getPeopleText(item)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id) && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {getRelationshipText(item, primaryItem.id)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'skillsGaps' && item.skillsGaps && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {item.skillsGaps}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              )
-                                            }
-                                            
-                                            // Related to some - render in specific columns
-                                            return thirdLensItems.map((thirdLensItem, colIdx) => {
-                                              const isRelated = thirdLensItem.id && relatedThirdLensIds.has(thirdLensItem.id)
-                                              if (!isRelated) {
-                                                return <div key={`${item.id}-${thirdLensItem.id || colIdx}-empty`} style={{ gridRow: itemRowIdx + 1 }} />
-                                              }
-                                              return (
-                                                <div
-                                                  key={`${item.id}-${thirdLensItem.id || colIdx}`}
-                                                  style={{
-                                                    ...getHighlightedItemColor(item),
-                                                    ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-                                                    borderStyle: 'solid',
-                                                    borderWidth: '1px',
-                                                    gridColumn: colIdx + 1,
-                                                    gridRow: itemRowIdx + 1
-                                                  }}
-                                                  className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-                                                  onMouseEnter={() => {
-                                                    if (item.id) setHoveredItemId(item.id)
-                                                    setHoveredParentName(null)
-                                                  }}
-                                                  onMouseLeave={() => {
-                                                    setHoveredItemId(null)
-                                                    setHoveredParentName(null)
-                                                  }}
-                                                  onClick={() => {
-                                                    setEditItem(item)
-                                                    setEditDialogOpen(true)
-                                                  }}
-                                                >
-                                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                                    {item.name}
-                                                  </div>
-                                                  {minorTextOption === 'description' && item.description && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {item.description}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'lifecycle' && (
-                                                    <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                                      {getLifecycleLabel(item.lifecycleStatus)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'people' && getPeopleText(item) && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {getPeopleText(item)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'relationships' && primaryItem.id && getRelationshipText(item, primaryItem.id) && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {getRelationshipText(item, primaryItem.id)}
-                                                    </div>
-                                                  )}
-                                                  {minorTextOption === 'skillsGaps' && item.skillsGaps && (
-                                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                                      {item.skillsGaps}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              )
-                                            })
-                                          })}
-                                        </div>
-                                      ) : (
-                                        // Use dynamic grid (up to 5 cols, stretch to fill) when no third lens
-                                        <div 
-                                          style={columnViewMode === 'both' ? { 
-                                            gridColumn: '3',
-                                            display: 'grid',
-                                            gridTemplateColumns: `repeat(${Math.max(1, Math.min(targetItems.length, 3))}, minmax(0, 1fr))`,
-                                            gap: '0.25rem'
-                                          } : {}}
-                                          className={columnViewMode === 'both' ? '' : `grid ${getGridColsClass()} gap-1`}
-                                        >
-                                          {targetItems.map((item: ItemRecord) => {
-                                            const isHighlighted = shouldHighlightItem(item)
-                                            const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                            return renderItemWithThirdLens(
-                                              item,
-                                              isHighlighted,
-                                              highlightClass,
-                                              () => {
-                                                if (item.id) setHoveredItemId(item.id)
-                                                setHoveredParentName(null)
-                                              },
-                                              () => {
-                                                setHoveredItemId(null)
-                                                setHoveredParentName(null)
-                                              },
-                                              () => {
-                                                setEditItem(item)
-                                                setEditDialogOpen(true)
-                                              },
-                                              'target', // Target column
-                                              primaryItem.id // Pass primary item ID for relationships
-                                            )
-                                          })}
-                                        </div>
-                                      )
+                                      <div className={`grid ${getGridColsClass()} gap-1`}>
+                                        {targetItems.map((item: ItemRecord) => {
+                                          const isHighlighted = shouldHighlightItem(item)
+                                          const highlightClass = isHighlighted ? getOutlineClasses() : ''
+                                          return (
+                                          <div
+                                            key={item.id}
+                                            className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                            style={{
+                                              ...getHighlightedItemColor(item),
+                                              ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                            }}
+                                            onMouseEnter={() => {
+                                              if (item.id) setHoveredItemId(item.id)
+                                              setHoveredParentName(null)
+                                            }}
+                                            onMouseLeave={() => {
+                                              setHoveredItemId(null)
+                                              setHoveredParentName(null)
+                                            }}
+                                            onClick={() => {
+                                              setEditItem(item)
+                                              setEditDialogOpen(true)
+                                            }}
+                                          >
+                                            <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                              {item.name}
+                                            </div>
+                                            {minorTextOption === 'description' && item.description && (
+                                              <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                                {item.description}
+                                              </div>
+                                            )}
+                                            {minorTextOption === 'lifecycle' && (
+                                              <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                                {getLifecycleLabel(item.lifecycleStatus)}
+                                              </div>
+                                            )}
+                                          </div>
+                                          )
+                                        })}
+                                      </div>
                                     ) : (
-                                      <div 
-                                        style={columnViewMode === 'both' ? { gridColumn: '3' } : {}}
-                                        className="text-xs text-slate-500 dark:text-slate-400 italic py-2 text-center"
-                                      >
-                                        No Target items
+                                      <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+                                        No Target items for {primaryItem.name}
+                                        {divestItems.length > 0 && (
+                                          <div className="mt-1 text-[10px]">
+                                            Current: {divestItems.map((item: ItemRecord) => item.name).join(', ')}
+                                          </div>
+                                        )}
                                       </div>
                                     )}
-                                  </>
+                                  </div>
                                   )}
                                 </>
                               ) : (
                                 /* Single Column: All items when no lifecycleStatus */
                                 <div>
                                   {allItems && allItems.length > 0 ? (
-                                    thirdLens && thirdLensItems.length > 0 ? (
-                                      // Show items in sub-columns (headers are in main header row)
-                                      <div 
-                                        style={{ 
-                                          gridColumn: `2 / ${2 + thirdLensItems.length}`,
-                                          display: 'grid',
-                                          gridTemplateColumns: `repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                                          gap: '0.25rem',
-                                          alignContent: 'start'
-                                        }}
-                                      >
-                                        {/* Items aligned with sub-columns */}
-                                        {allItems.map((item: ItemRecord) => {
-                                          const isHighlighted = shouldHighlightItem(item)
-                                          const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                          return renderItemWithThirdLens(
-                                            item,
-                                            isHighlighted,
-                                            highlightClass,
-                                            () => {
-                                              if (item.id) setHoveredItemId(item.id)
-                                              setHoveredParentName(null)
-                                            },
-                                            () => {
-                                              setHoveredItemId(null)
-                                              setHoveredParentName(null)
-                                            },
-                                            () => {
-                                              setEditItem(item)
-                                              setEditDialogOpen(true)
-                                            },
-                                            undefined, // No column filter for single column mode
-                                            primaryItem.id // Pass primary item ID for relationships
-                                          )
-                                        })}
-                                      </div>
-                                    ) : (
-                                      <div className={`grid ${getGridColsClass()} gap-1`}>
-                                        {allItems.map((item: ItemRecord) => {
-                                          const isHighlighted = shouldHighlightItem(item)
-                                          const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                          return renderItemWithThirdLens(
-                                            item,
-                                            isHighlighted,
-                                            highlightClass,
-                                            () => {
-                                              if (item.id) setHoveredItemId(item.id)
-                                              setHoveredParentName(null)
-                                            },
-                                            () => {
-                                              setHoveredItemId(null)
-                                              setHoveredParentName(null)
-                                            },
-                                            () => {
-                                              setEditItem(item)
-                                              setEditDialogOpen(true)
-                                            },
-                                            undefined, // No column filter for single column mode
-                                            primaryItem.id // Pass primary item ID for relationships
-                                          )
-                                        })}
-                                      </div>
-                                    )
+                                    <div className={`grid ${getGridColsClass()} gap-1`}>
+                                      {allItems.map((item: ItemRecord) => {
+                                        const isHighlighted = shouldHighlightItem(item)
+                                        const highlightClass = isHighlighted ? getOutlineClasses() : ''
+                                        return (
+                                        <div
+                                          key={item.id}
+                                          className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                          style={{
+                                            ...getHighlightedItemColor(item),
+                                            ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                            borderStyle: 'solid',
+                                            borderWidth: '1px',
+                                          }}
+                                          onMouseEnter={() => {
+                                            if (item.id) setHoveredItemId(item.id)
+                                            setHoveredParentName(null)
+                                          }}
+                                          onMouseLeave={() => {
+                                            setHoveredItemId(null)
+                                            setHoveredParentName(null)
+                                          }}
+                                          onClick={() => {
+                                            setEditItem(item)
+                                            setEditDialogOpen(true)
+                                          }}
+                                        >
+                                          <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                            {item.name}
+                                          </div>
+                                          {minorTextOption === 'description' && item.description && (
+                                            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                              {item.description}
+                                            </div>
+                                          )}
+                                          {minorTextOption === 'lifecycle' && (
+                                            <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                              {getLifecycleLabel(item.lifecycleStatus)}
+                                            </div>
+                                          )}
+                                        </div>
+                                        )
+                                      })}
+                                    </div>
                                   ) : (
                                     <div className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
                                       No items
@@ -4175,541 +3106,221 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
                     </div>
                   )
                 })}
-                
-                {/* Unrelated Secondary Items Row */}
-                {showUnrelatedSecondary && unrelatedSecondaryItems.length > 0 && (
-                <div className="bg-white dark:bg-slate-800 rounded border border-slate-300 dark:border-slate-700 overflow-hidden">
-                  <div
-                    style={(() => {
-                      if (thirdLens && thirdLensItems.length > 0) {
-                        if (!hasAnyLifecycleStatus) {
-                          return {
-                            display: 'grid',
-                            gridTemplateColumns: `200px repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                            gap: '0.75rem',
-                          }
-                        }
-                        if (columnViewMode === 'both') {
-                          return {
-                            display: 'grid',
-                            gridTemplateColumns: `200px repeat(${thirdLensItems.length}, minmax(0, 1fr)) repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                            gap: '0.75rem',
-                          }
-                        }
-                        return {
-                          display: 'grid',
-                          gridTemplateColumns: `200px repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                          gap: '0.75rem',
-                        }
-                      }
-                      // When no third lens, use inline styles for consistency
-                      if (!hasAnyLifecycleStatus) {
-                        return {
-                          display: 'grid',
-                          gridTemplateColumns: '200px 1fr',
-                          rowGap: '0.75rem',
-                          columnGap: '0.75rem',
-                        }
-                      }
-                      if (columnViewMode === 'both') {
-                        return {
-                          display: 'grid',
-                          gridTemplateColumns: '200px 1fr 1fr',
-                          rowGap: '0.75rem',
-                          columnGap: '1.25rem',
-                        }
-                      }
-                      return {
-                        display: 'grid',
-                        gridTemplateColumns: '200px 1fr',
-                        rowGap: '0.75rem',
-                        columnGap: '0.75rem',
-                      }
-                    })()}
-                    className={`gap-3 p-2 ${itemAnalysis.length > 0 ? 'mt-3' : ''}`}
-                  >
-                    {/* Left: "Not Related" Label */}
-                    <div className="flex flex-col justify-start">
-                      <div className="font-bold text-sm text-slate-800 dark:text-slate-200">
-                        Not Related
-                      </div>
+              </div>
+              
+              {/* Unrelated Secondary Items Section */}
+              {showUnrelatedSecondary && unrelatedSecondaryItems.length > 0 && (
+                <div className="mt-6 pt-6 border-t-2 border-slate-300 dark:border-slate-700">
+                  <div className={`grid ${(() => {
+                    if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
+                    if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
+                    return 'grid-cols-[200px_1fr]'
+                  })()} gap-3 mb-2 pb-2 border-b-2 border-slate-300 dark:border-slate-700`}>
+                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                      {LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens} (Not Related)
                     </div>
-                    
                     {hasAnyLifecycleStatus ? (
                       <>
-                        {(columnViewMode === 'both' || columnViewMode === 'current') && (
+                        {columnViewMode === 'both' && (
                           <>
-                            {thirdLens && thirdLensItems.length > 0 ? (
-                              <div 
-                                style={{ 
-                                  gridColumn: columnViewMode === 'both' ? `2 / ${2 + thirdLensItems.length}` : `2 / ${2 + thirdLensItems.length}`,
-                                  display: 'grid',
-                                  gridTemplateColumns: `repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                                  gap: '0.25rem',
-                                  alignContent: 'start',
-                                  width: '100%'
-                                }}
-                              >
-                                {unrelatedSecondaryItems
-                                  .filter(item => {
-                                    return item.lifecycleStatus === 'Divest' || 
-                                           item.lifecycleStatus === 'Stable' ||
-                                           (!item.lifecycleStatus)
-                                  })
-                                  .map((item: ItemRecord, itemRowIdx: number) => {
-                                    const isHighlighted = shouldHighlightItem(item)
-                                    const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                    // For Current column: exclude relationships with "Planned to add"
-                                    const relatedThirdLensIds = item.id ? getThirdLensRelationshipsForColumn(item.id, 'current') : new Set<number>()
-                                    const allThirdLensIds = new Set(thirdLensItems.map(i => i.id!).filter((id): id is number => id !== undefined))
-                                    
-                                    if (relatedThirdLensIds.size === 0 || relatedThirdLensIds.size === allThirdLensIds.size) {
-                                      return (
-                                        <div
-                                          key={item.id}
-                                          style={{
-                                            ...getHighlightedItemColor(item),
-                                            ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-                                            borderStyle: 'solid',
-                                            borderWidth: '1px',
-                                            gridColumn: `1 / ${thirdLensItems.length + 1}`,
-                                            gridRow: itemRowIdx + 1
-                                          }}
-                                          className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-                                          onMouseEnter={() => {
-                                            if (item.id) setHoveredItemId(item.id)
-                                            setHoveredParentName(null)
-                                          }}
-                                          onMouseLeave={() => {
-                                            setHoveredItemId(null)
-                                            setHoveredParentName(null)
-                                          }}
-                                          onClick={() => {
-                                            setEditItem(item)
-                                            setEditDialogOpen(true)
-                                          }}
-                                        >
-                                          <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                            {item.name}
-                                          </div>
-                                          {minorTextOption === 'description' && item.description && (
-                                            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                              {item.description}
-                                            </div>
-                                          )}
-                                          {minorTextOption === 'lifecycle' && (
-                                            <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                              {getLifecycleLabel(item.lifecycleStatus)}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )
-                                    }
-                                    
-                                    return thirdLensItems.map((thirdLensItem, colIdx) => {
-                                      const isRelated = thirdLensItem.id && relatedThirdLensIds.has(thirdLensItem.id)
-                                      if (!isRelated) {
-                                        return <div key={`${item.id}-${thirdLensItem.id || colIdx}-empty`} style={{ gridRow: itemRowIdx + 1 }} />
-                                      }
-                                      return (
-                                        <div
-                                          key={`${item.id}-${thirdLensItem.id || colIdx}`}
-                                          style={{
-                                            ...getHighlightedItemColor(item),
-                                            ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-                                            borderStyle: 'solid',
-                                            borderWidth: '1px',
-                                            gridColumn: colIdx + 1,
-                                            gridRow: itemRowIdx + 1
-                                          }}
-                                          className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-                                          onMouseEnter={() => {
-                                            if (item.id) setHoveredItemId(item.id)
-                                            setHoveredParentName(null)
-                                          }}
-                                          onMouseLeave={() => {
-                                            setHoveredItemId(null)
-                                            setHoveredParentName(null)
-                                          }}
-                                          onClick={() => {
-                                            setEditItem(item)
-                                            setEditDialogOpen(true)
-                                          }}
-                                        >
-                                          <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                            {item.name}
-                                          </div>
-                                          {minorTextOption === 'description' && item.description && (
-                                            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                              {item.description}
-                                            </div>
-                                          )}
-                                          {minorTextOption === 'lifecycle' && (
-                                            <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                              {getLifecycleLabel(item.lifecycleStatus)}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )
-                                    })
-                                  })}
-                              </div>
-                            ) : (
-                              <div 
-                                style={columnViewMode === 'both' ? { 
-                                  gridColumn: '2',
-                                  display: 'grid',
-                                  gridTemplateColumns: `repeat(${Math.max(1, Math.min(
-                                    unrelatedSecondaryItems.filter(item => item.lifecycleStatus === 'Divest' || item.lifecycleStatus === 'Stable' || !item.lifecycleStatus).length,
-                                    3
-                                  ))}, minmax(0, 1fr))`,
-                                  gap: '0.25rem'
-                                } : {}}
-                                className={columnViewMode === 'both' ? '' : `grid ${getGridColsClass()} gap-1`}
-                              >
-                                {unrelatedSecondaryItems
-                                  .filter(item => {
-                                    return item.lifecycleStatus === 'Divest' || 
-                                           item.lifecycleStatus === 'Stable' ||
-                                           (!item.lifecycleStatus)
-                                  })
-                                  .map((item: ItemRecord) => {
-                                    const isHighlighted = shouldHighlightItem(item)
-                                    const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                    return renderItemWithThirdLens(
-                                      item,
-                                      isHighlighted,
-                                      highlightClass,
-                                      () => {
-                                        if (item.id) setHoveredItemId(item.id)
-                                        setHoveredParentName(null)
-                                      },
-                                      () => {
-                                        setHoveredItemId(null)
-                                        setHoveredParentName(null)
-                                      },
-                                      () => {
-                                        setEditItem(item)
-                                        setEditDialogOpen(true)
-                                      },
-                                      'current' // Current column
-                                      // Note: unrelated items are not associated with a specific primary item, so relationships cannot be shown
-                                    )
-                                  })}
-                              </div>
-                            )}
+                            <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                              Current
+                            </div>
+                            <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                              Target
+                            </div>
                           </>
                         )}
-                        {(columnViewMode === 'both' || columnViewMode === 'target') && (
-                          <>
-                            {thirdLens && thirdLensItems.length > 0 ? (
-                              <div 
-                                style={{ 
-                                  gridColumn: columnViewMode === 'both' ? `${2 + thirdLensItems.length} / ${2 + 2 * thirdLensItems.length}` : `2 / ${2 + thirdLensItems.length}`,
-                                  display: 'grid',
-                                  gridTemplateColumns: `repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                                  gap: '0.25rem',
-                                  alignContent: 'start',
-                                  width: '100%'
-                                }}
-                              >
-                                {unrelatedSecondaryItems
-                                  .filter(item => {
-                                    return item.lifecycleStatus !== 'Divest'
-                                  })
-                                  .map((item: ItemRecord, itemRowIdx: number) => {
-                                    const isHighlighted = shouldHighlightItem(item)
-                                    const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                    // For Target column: exclude relationships with "Planned to remove"
-                                    const relatedThirdLensIds = item.id ? getThirdLensRelationshipsForColumn(item.id, 'target') : new Set<number>()
-                                    const allThirdLensIds = new Set(thirdLensItems.map(i => i.id!).filter((id): id is number => id !== undefined))
-                                    
-                                    if (relatedThirdLensIds.size === 0 || relatedThirdLensIds.size === allThirdLensIds.size) {
-                                      return (
-                                        <div
-                                          key={item.id}
-                                          style={{
-                                            ...getHighlightedItemColor(item),
-                                            ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-                                            borderStyle: 'solid',
-                                            borderWidth: '1px',
-                                            gridColumn: `1 / ${thirdLensItems.length + 1}`,
-                                            gridRow: itemRowIdx + 1
-                                          }}
-                                          className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-                                          onMouseEnter={() => {
-                                            if (item.id) setHoveredItemId(item.id)
-                                            setHoveredParentName(null)
-                                          }}
-                                          onMouseLeave={() => {
-                                            setHoveredItemId(null)
-                                            setHoveredParentName(null)
-                                          }}
-                                          onClick={() => {
-                                            setEditItem(item)
-                                            setEditDialogOpen(true)
-                                          }}
-                                        >
-                                          <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                            {item.name}
-                                          </div>
-                                          {minorTextOption === 'description' && item.description && (
-                                            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                              {item.description}
-                                            </div>
-                                          )}
-                                          {minorTextOption === 'lifecycle' && (
-                                            <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                              {getLifecycleLabel(item.lifecycleStatus)}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )
-                                    }
-                                    
-                                    return thirdLensItems.map((thirdLensItem, colIdx) => {
-                                      const isRelated = thirdLensItem.id && relatedThirdLensIds.has(thirdLensItem.id)
-                                      if (!isRelated) {
-                                        return <div key={`${item.id}-${thirdLensItem.id || colIdx}-empty`} style={{ gridRow: itemRowIdx + 1 }} />
-                                      }
-                                      return (
-                                        <div
-                                          key={`${item.id}-${thirdLensItem.id || colIdx}`}
-                                          style={{
-                                            ...getHighlightedItemColor(item),
-                                            ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-                                            borderStyle: 'solid',
-                                            borderWidth: '1px',
-                                            gridColumn: colIdx + 1,
-                                            gridRow: itemRowIdx + 1
-                                          }}
-                                          className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-                                          onMouseEnter={() => {
-                                            if (item.id) setHoveredItemId(item.id)
-                                            setHoveredParentName(null)
-                                          }}
-                                          onMouseLeave={() => {
-                                            setHoveredItemId(null)
-                                            setHoveredParentName(null)
-                                          }}
-                                          onClick={() => {
-                                            setEditItem(item)
-                                            setEditDialogOpen(true)
-                                          }}
-                                        >
-                                          <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                            {item.name}
-                                          </div>
-                                          {minorTextOption === 'description' && item.description && (
-                                            <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                              {item.description}
-                                            </div>
-                                          )}
-                                          {minorTextOption === 'lifecycle' && (
-                                            <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                              {getLifecycleLabel(item.lifecycleStatus)}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )
-                                    })
-                                  })}
-                              </div>
-                            ) : (
-                              <div 
-                                style={columnViewMode === 'both' ? { 
-                                  gridColumn: '3',
-                                  display: 'grid',
-                                  gridTemplateColumns: `repeat(${Math.max(1, Math.min(
-                                    unrelatedSecondaryItems.filter(item => item.lifecycleStatus !== 'Divest').length,
-                                    3
-                                  ))}, minmax(0, 1fr))`,
-                                  gap: '0.25rem'
-                                } : {}}
-                                className={columnViewMode === 'both' ? '' : `grid ${getGridColsClass()} gap-1`}
-                              >
-                                {unrelatedSecondaryItems
-                                  .filter(item => {
-                                    return item.lifecycleStatus !== 'Divest'
-                                  })
-                                  .map((item: ItemRecord) => {
-                                    const isHighlighted = shouldHighlightItem(item)
-                                    const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                                    return renderItemWithThirdLens(
-                                      item,
-                                      isHighlighted,
-                                      highlightClass,
-                                      () => {
-                                        if (item.id) setHoveredItemId(item.id)
-                                        setHoveredParentName(null)
-                                      },
-                                      () => {
-                                        setHoveredItemId(null)
-                                        setHoveredParentName(null)
-                                      },
-                                      () => {
-                                        setEditItem(item)
-                                        setEditDialogOpen(true)
-                                      },
-                                      'target' // Target column
-                                    )
-                                  })}
-                              </div>
-                            )}
-                          </>
+                        {columnViewMode === 'current' && (
+                          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                            Current
+                          </div>
+                        )}
+                        {columnViewMode === 'target' && (
+                          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                            Target
+                          </div>
                         )}
                       </>
                     ) : (
-                      <>
-                        {thirdLens && thirdLensItems.length > 0 ? (
-                          <div 
-                            style={{ 
-                              gridColumn: `2 / ${2 + thirdLensItems.length}`,
-                              display: 'grid',
-                              gridTemplateColumns: `repeat(${thirdLensItems.length}, minmax(0, 1fr))`,
-                              gap: '0.25rem',
-                              alignContent: 'start',
-                              width: '100%'
-                            }}
-                          >
-                            {unrelatedSecondaryItems.map((item: ItemRecord, itemRowIdx: number) => {
-                              const isHighlighted = shouldHighlightItem(item)
-                              const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                              const relatedThirdLensIds = item.id ? getThirdLensRelationships(item.id) : new Set<number>()
-                              const allThirdLensIds = new Set(thirdLensItems.map(i => i.id!).filter((id): id is number => id !== undefined))
-                              
-                              if (relatedThirdLensIds.size === 0 || relatedThirdLensIds.size === allThirdLensIds.size) {
-                                return (
-                                  <div
-                                    key={item.id}
-                                    style={{
-                                      ...getHighlightedItemColor(item),
-                                      ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-                                      borderStyle: 'solid',
-                                      borderWidth: '1px',
-                                      gridColumn: `1 / ${thirdLensItems.length + 1}`,
-                                      gridRow: itemRowIdx + 1
-                                    }}
-                                    className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-                                    onMouseEnter={() => {
-                                      if (item.id) setHoveredItemId(item.id)
-                                      setHoveredParentName(null)
-                                    }}
-                                    onMouseLeave={() => {
-                                      setHoveredItemId(null)
-                                      setHoveredParentName(null)
-                                    }}
-                                    onClick={() => {
-                                      setEditItem(item)
-                                      setEditDialogOpen(true)
-                                    }}
-                                  >
-                                    <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                      {item.name}
-                                    </div>
-                                    {minorTextOption === 'description' && item.description && (
-                                      <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                        {item.description}
+                      <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 text-center">
+                        {LENSES.find(l => l.key === secondaryLens)?.label || secondaryLens}
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="bg-white dark:bg-slate-800 rounded border border-slate-300 dark:border-slate-700 overflow-hidden p-2">
+                    <div className={`grid ${(() => {
+                      if (!hasAnyLifecycleStatus) return 'grid-cols-[200px_1fr]'
+                      if (columnViewMode === 'both') return 'grid-cols-[200px_1fr_1fr]'
+                      return 'grid-cols-[200px_1fr]'
+                    })()} gap-3`}>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 italic">
+                        (No primary item)
+                      </div>
+                      {hasAnyLifecycleStatus ? (
+                        <>
+                          {(columnViewMode === 'both' || columnViewMode === 'current') && (
+                            <div className={columnViewMode === 'both' ? 'mr-6' : ''}>
+                              <div className={`grid ${getGridColsClass()} gap-1`}>
+                                {unrelatedSecondaryItems
+                                  .filter(item => {
+                                    // Show in Current if item has Divest status or relationship lifecycle is Divest
+                                    return item.lifecycleStatus === 'Divest' || 
+                                           item.lifecycleStatus === 'Stable' ||
+                                           (!item.lifecycleStatus)
+                                  })
+                                  .map((item: ItemRecord) => {
+                                    const isHighlighted = shouldHighlightItem(item)
+                                    const highlightClass = isHighlighted ? getOutlineClasses() : ''
+                                    return (
+                                      <div
+                                        key={item.id}
+                                        className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                        style={{
+                                          ...getHighlightedItemColor(item),
+                                          ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                          borderStyle: 'solid',
+                                          borderWidth: '1px',
+                                        }}
+                                        onMouseEnter={() => {
+                                          if (item.id) setHoveredItemId(item.id)
+                                          setHoveredParentName(null)
+                                        }}
+                                        onMouseLeave={() => {
+                                          setHoveredItemId(null)
+                                          setHoveredParentName(null)
+                                        }}
+                                        onClick={() => {
+                                          setEditItem(item)
+                                          setEditDialogOpen(true)
+                                        }}
+                                      >
+                                        <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                          {item.name}
+                                        </div>
+                                        {minorTextOption === 'description' && item.description && (
+                                          <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                            {item.description}
+                                          </div>
+                                        )}
+                                        {minorTextOption === 'lifecycle' && (
+                                          <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                            {getLifecycleLabel(item.lifecycleStatus)}
+                                          </div>
+                                        )}
                                       </div>
-                                    )}
-                                    {minorTextOption === 'lifecycle' && (
-                                      <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                        {getLifecycleLabel(item.lifecycleStatus)}
+                                    )
+                                  })}
+                              </div>
+                            </div>
+                          )}
+                          {(columnViewMode === 'both' || columnViewMode === 'target') && (
+                            <div className={columnViewMode === 'both' ? 'ml-6' : ''}>
+                              <div className={`grid ${getGridColsClass()} gap-1`}>
+                                {unrelatedSecondaryItems
+                                  .filter(item => {
+                                    // Show in Target if item doesn't have Divest status
+                                    return item.lifecycleStatus !== 'Divest'
+                                  })
+                                  .map((item: ItemRecord) => {
+                                    const isHighlighted = shouldHighlightItem(item)
+                                    const highlightClass = isHighlighted ? getOutlineClasses() : ''
+                                    return (
+                                      <div
+                                        key={item.id}
+                                        className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                        style={{
+                                          ...getHighlightedItemColor(item),
+                                          ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                          borderStyle: 'solid',
+                                          borderWidth: '1px',
+                                        }}
+                                        onMouseEnter={() => {
+                                          if (item.id) setHoveredItemId(item.id)
+                                          setHoveredParentName(null)
+                                        }}
+                                        onMouseLeave={() => {
+                                          setHoveredItemId(null)
+                                          setHoveredParentName(null)
+                                        }}
+                                        onClick={() => {
+                                          setEditItem(item)
+                                          setEditDialogOpen(true)
+                                        }}
+                                      >
+                                        <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                          {item.name}
+                                        </div>
+                                        {minorTextOption === 'description' && item.description && (
+                                          <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                            {item.description}
+                                          </div>
+                                        )}
+                                        {minorTextOption === 'lifecycle' && (
+                                          <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                            {getLifecycleLabel(item.lifecycleStatus)}
+                                          </div>
+                                        )}
                                       </div>
-                                    )}
-                                    {minorTextOption === 'people' && getPeopleText(item) && (
-                                      <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                        {getPeopleText(item)}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              }
-                              
-                              return thirdLensItems.map((thirdLensItem, colIdx) => {
-                                const isRelated = thirdLensItem.id && relatedThirdLensIds.has(thirdLensItem.id)
-                                if (!isRelated) {
-                                  return <div key={`${item.id}-${thirdLensItem.id || colIdx}-empty`} style={{ gridRow: itemRowIdx + 1 }} />
-                                }
-                                return (
-                                  <div
-                                    key={`${item.id}-${thirdLensItem.id || colIdx}`}
-                                    style={{
-                                      ...getHighlightedItemColor(item),
-                                      ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
-                                      borderStyle: 'solid',
-                                      borderWidth: '1px',
-                                      gridColumn: colIdx + 1,
-                                      gridRow: itemRowIdx + 1
-                                    }}
-                                    className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
-                                    onMouseEnter={() => {
-                                      if (item.id) setHoveredItemId(item.id)
-                                      setHoveredParentName(null)
-                                    }}
-                                    onMouseLeave={() => {
-                                      setHoveredItemId(null)
-                                      setHoveredParentName(null)
-                                    }}
-                                    onClick={() => {
-                                      setEditItem(item)
-                                      setEditDialogOpen(true)
-                                    }}
-                                  >
-                                    <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
-                                      {item.name}
-                                    </div>
-                                    {minorTextOption === 'description' && item.description && (
-                                      <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                        {item.description}
-                                      </div>
-                                    )}
-                                    {minorTextOption === 'lifecycle' && (
-                                      <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
-                                        {getLifecycleLabel(item.lifecycleStatus)}
-                                      </div>
-                                    )}
-                                    {minorTextOption === 'people' && getPeopleText(item) && (
-                                      <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
-                                        {getPeopleText(item)}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              })
-                            })}
-                          </div>
-                        ) : (
+                                    )
+                                  })}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div>
                           <div className={`grid ${getGridColsClass()} gap-1`}>
                             {unrelatedSecondaryItems.map((item: ItemRecord) => {
                               const isHighlighted = shouldHighlightItem(item)
                               const highlightClass = isHighlighted ? getOutlineClasses() : ''
-                              return renderItemWithThirdLens(
-                                item,
-                                isHighlighted,
-                                highlightClass,
-                                () => {
-                                  if (item.id) setHoveredItemId(item.id)
-                                  setHoveredParentName(null)
-                                },
-                                () => {
-                                  setHoveredItemId(null)
-                                  setHoveredParentName(null)
-                                },
-                                () => {
-                                  setEditItem(item)
-                                  setEditDialogOpen(true)
-                                }
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`p-1 rounded border text-center cursor-pointer ${getOpacityClass(item)} ${highlightClass}`}
+                                  style={{
+                                    ...getHighlightedItemColor(item),
+                                    ...(isHighlighted ? getOutlineColor(item.lifecycleStatus) : {}),
+                                    borderStyle: 'solid',
+                                    borderWidth: '1px',
+                                  }}
+                                  onMouseEnter={() => {
+                                    if (item.id) setHoveredItemId(item.id)
+                                    setHoveredParentName(null)
+                                  }}
+                                  onMouseLeave={() => {
+                                    setHoveredItemId(null)
+                                    setHoveredParentName(null)
+                                  }}
+                                  onClick={() => {
+                                    setEditItem(item)
+                                    setEditDialogOpen(true)
+                                  }}
+                                >
+                                  <div className="text-xs text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+                                    {item.name}
+                                  </div>
+                                  {minorTextOption === 'description' && item.description && (
+                                    <div className="text-[9px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1">
+                                      {item.description}
+                                    </div>
+                                  )}
+                                  {minorTextOption === 'lifecycle' && (
+                                    <div className="text-[9px] mt-0.5 font-medium text-slate-700 dark:text-slate-300">
+                                      {getLifecycleLabel(item.lifecycleStatus)}
+                                    </div>
+                                  )}
+                                </div>
                               )
                             })}
                           </div>
-                        )}
-                      </>
-                    )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
-              </div>
             </div>
           ) : (
             <div className="text-center py-12 text-slate-500 dark:text-slate-400">

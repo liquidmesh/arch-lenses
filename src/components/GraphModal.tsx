@@ -39,6 +39,11 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     const parsed = saved ? parseFloat(saved) : 1
     return isNaN(parsed) || parsed <= 0 ? 1 : parsed
   })
+  const [boxWidthScale, setBoxWidthScale] = useState(() => {
+    const saved = localStorage.getItem('graph-box-width-scale')
+    const parsed = saved ? parseFloat(saved) : 1
+    return isNaN(parsed) || parsed <= 0 ? 1 : parsed
+  })
   const [showParentBoxes, setShowParentBoxes] = useState(() => {
     const saved = localStorage.getItem('graph-show-parent-boxes')
     return saved === 'true'
@@ -182,6 +187,18 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     }
   }, [])
 
+  // Listen for lens order updates to trigger re-render
+  useEffect(() => {
+    function handleLensOrderUpdated() {
+      // Force re-render by reloading lenses, which will trigger visibleLenses recalculation
+      loadLenses()
+    }
+    window.addEventListener('lensOrderUpdated', handleLensOrderUpdated)
+    return () => {
+      window.removeEventListener('lensOrderUpdated', handleLensOrderUpdated)
+    }
+  }, [])
+
   // Persist layout mode to localStorage
   useEffect(() => {
     localStorage.setItem('graph-layout-mode', layoutMode)
@@ -201,6 +218,11 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   useEffect(() => {
     localStorage.setItem('graph-zoom', zoom.toString())
   }, [zoom])
+
+  // Persist box width scale to localStorage
+  useEffect(() => {
+    localStorage.setItem('graph-box-width-scale', boxWidthScale.toString())
+  }, [boxWidthScale])
 
   // Persist show parent boxes to localStorage
   useEffect(() => {
@@ -900,7 +922,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   }, [viewMode, managerHierarchy, dims.w, zoom, visibleManagers])
 
   const layout = useMemo(() => {
-    const layoutResult = computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode, showParentBoxes, zoom, viewMode)
+    const layoutResult = computeLayout(filteredItems, dims.w, dims.h, visibleLenses, layoutMode, showParentBoxes, zoom, viewMode, boxWidthScale)
     // Adjust layout to account for manager row if in Architecture Coverage view
     if (viewMode === 'skillGaps' && managerPositions.size > 0) {
       // Calculate the maximum Y position of all managers to determine total height needed
@@ -936,7 +958,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
       }
     }
     return layoutResult
-  }, [filteredItems, dims, visibleLenses, layoutMode, showParentBoxes, zoom, viewMode, managerPositions])
+  }, [filteredItems, dims, visibleLenses, layoutMode, showParentBoxes, zoom, viewMode, managerPositions, boxWidthScale])
 
   // Determine if selected item is on left or right side of diagram
   const detailsBoxPosition = useMemo(() => {
@@ -1673,6 +1695,13 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
                 <span className="text-xs min-w-[3rem] text-center">{Math.round(zoom * 100)}%</span>
                 <button onClick={() => setZoom(z => Math.min(2, z + 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">+</button>
                 <button onClick={() => setZoom(1)} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Reset</button>
+              </div>
+              <div className="flex items-center gap-1 border-l border-slate-300 dark:border-slate-700 pl-2">
+                <span className="text-xs">Box width:</span>
+                <button onClick={() => setBoxWidthScale(s => Math.max(0.5, s - 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">−</button>
+                <span className="text-xs min-w-[3rem] text-center">{Math.round(boxWidthScale * 100)}%</span>
+                <button onClick={() => setBoxWidthScale(s => Math.min(2, s + 0.1))} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">+</button>
+                <button onClick={() => setBoxWidthScale(1)} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Reset</button>
               </div>
               <div className="flex items-center gap-1 border-l border-slate-300 dark:border-slate-700 pl-2">
                 <button onClick={handleExportSVG} className="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800" title="Export as SVG">Export SVG</button>
@@ -2735,7 +2764,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   )
 }
 
-function computeLayout(items: ItemRecord[], windowW: number, windowH: number, visibleLenses: typeof LENSES, mode: 'columns' | 'rows', showParentBoxes: boolean = true, zoom: number = 1, viewMode: 'skillGaps' | 'tags' | 'summary' | 'tasks' | 'minimal' = 'summary') {
+function computeLayout(items: ItemRecord[], windowW: number, windowH: number, visibleLenses: typeof LENSES, mode: 'columns' | 'rows', showParentBoxes: boolean = true, zoom: number = 1, viewMode: 'skillGaps' | 'tags' | 'summary' | 'tasks' | 'minimal' = 'summary', boxWidthScale: number = 1) {
   const padding = 16
   // When zoomed in (zoom > 1), calculate layout with more space to fit more items per row
   // Divide by zoom to account for the fact that we'll scale up, so we need less base space
@@ -2754,8 +2783,10 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
 
   if (mode === 'columns') {
     const n = visibleLenses.length
-    let colWidth = Math.floor((availableW - colGap * (n - 1)) / n)
-    colWidth = Math.max(160, colWidth)
+    let baseColWidth = Math.floor((availableW - colGap * (n - 1)) / n)
+    baseColWidth = Math.max(160, baseColWidth)
+    // Scale column width with boxWidthScale
+    const colWidth = Math.floor(baseColWidth * boxWidthScale)
 
     let maxRows = 0
     visibleLenses.forEach((l, idx) => {
@@ -2845,10 +2876,11 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     })
 
     const contentH = topOffset + Math.max(1, maxRows) * (nodeHeight + rowGap) + padding
-    // Ensure width accounts for all columns
+    // Ensure width accounts for all columns (colWidth is already scaled)
     const calculatedWidth = padding + n * colWidth + (n - 1) * colGap + padding
     const width = Math.max(availableW, calculatedWidth)
     const height = Math.max(availableH, contentH)
+    // Node width is calculated from the already-scaled colWidth
     const nodeWidth = Math.min(200, Math.floor(colWidth * 0.9))
 
     // Center-align: calculate offset to center all columns
@@ -2899,9 +2931,13 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
       
       currentY += headerHeight + headerGap
       
-      // Calculate items per row based on available width, accounting for zoom
-      // When zoomed in, we have more effective space, so fit more items
-      const itemsPerRow = Math.max(1, Math.floor((availableW - padding * 2) / 170))
+      // Calculate nodeWidth first (will be used for spacing calculations)
+      const baseNodeWidth = 160
+      const actualNodeWidth = Math.floor(baseNodeWidth * boxWidthScale)
+      
+      // Calculate items per row based on available width and actual node width
+      // Account for nodeWidth + colGap between items
+      const itemsPerRow = Math.max(1, Math.floor((availableW - padding * 2) / (actualNodeWidth + colGap)))
       const itemWidth = Math.floor((availableW - padding * 2 - colGap * (itemsPerRow - 1)) / itemsPerRow)
       
       if (showParentBoxes) {
@@ -2925,6 +2961,7 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
           width: number
           height: number
           isStandalone: boolean // true for items without parent
+          itemsPerRow?: number // Number of items per row in this box
         }
         
         const allBoxes: ParentBoxInfo[] = []
@@ -2940,16 +2977,18 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
           const parentItems = itemsByParent.get(parent)!
           
           if (parent !== null && parentItems.length > 0) {
-            // Calculate items per row within this parent box (use standard item width)
-            const itemsPerRowInBox = Math.max(1, Math.floor((availableW - padding * 2) / 170))
-            const itemWidthInBox = 160 // Standard item width
+            // Calculate items per row within this parent box (use actual node width)
+            // First, estimate how many items could fit in the available width
+            const estimatedItemsPerRow = Math.max(1, Math.floor((availableW - padding * 2) / (actualNodeWidth + colGap)))
+            // Calculate the actual number of items per row based on the actual number of items
+            const itemsPerRowInBox = Math.min(estimatedItemsPerRow, parentItems.length)
             const numItemRows = Math.ceil(parentItems.length / itemsPerRowInBox)
             
             // Calculate actual width needed for items (wrap tightly around items)
-            // Use the number of items in the widest row
-            const itemsInWidestRow = Math.min(itemsPerRowInBox, parentItems.length)
-            const itemsWidth = itemsInWidestRow * itemWidthInBox + (itemsInWidestRow - 1) * colGap
-            const groupWidth = itemsWidth + parentGroupPadding * 2
+            // Use the number of items in the widest row (which is itemsPerRowInBox)
+            const itemsWidth = itemsPerRowInBox * actualNodeWidth + (itemsPerRowInBox - 1) * colGap
+            // Add padding on both sides, plus a small buffer to ensure items fit
+            const groupWidth = itemsWidth + parentGroupPadding * 2 + 4 // Extra 4px buffer to prevent wrapping
             const groupHeight = numItemRows * rowHeight + parentGroupPadding * 2 + parentGroupHeaderHeight
             
             allBoxes.push({
@@ -2957,7 +2996,8 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
               parentItems,
               width: groupWidth,
               height: groupHeight,
-              isStandalone: false
+              isStandalone: false,
+              itemsPerRow: itemsPerRowInBox // Store this for consistent positioning
             })
           }
         })
@@ -3012,12 +3052,12 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
               })
               
               // Position items within parent group
-              const itemsPerRowInBox = Math.max(1, Math.floor((availableW - padding * 2) / 170))
-              const itemWidthInBox = 160
+              // Use the stored itemsPerRow from box calculation to ensure consistency
+              const itemsPerRowInBox = box.itemsPerRow || Math.max(1, Math.floor((box.width - parentGroupPadding * 2) / (actualNodeWidth + colGap)))
               box.parentItems.forEach((it, colIdx) => {
                 const col = colIdx % itemsPerRowInBox
                 const row = Math.floor(colIdx / itemsPerRowInBox)
-                const x = groupX + parentGroupPadding + col * (itemWidthInBox + colGap) + itemWidthInBox / 2
+                const x = groupX + parentGroupPadding + col * (actualNodeWidth + colGap) + actualNodeWidth / 2
                 const y = groupY + parentGroupHeaderHeight + parentGroupPadding + row * rowHeight + nodeHeight / 2
                 if (it.id) positions.set(it.id, { x, y })
                 nodes.push({ ...it, x, y })
@@ -3068,11 +3108,12 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
           const startIdx = row * itemsPerRow
           const endIdx = Math.min(startIdx + itemsPerRow, rowItems.length)
           const itemsInRow = rowItems.slice(startIdx, endIdx)
-          const rowWidth = itemsInRow.length * itemWidth + (itemsInRow.length - 1) * colGap
+          // Use actualNodeWidth for spacing to ensure consistent gaps
+          const rowWidth = itemsInRow.length * actualNodeWidth + (itemsInRow.length - 1) * colGap
           const rowStartX = (availableW - rowWidth) / 2
           
           itemsInRow.forEach((it, colIdx) => {
-            const x = rowStartX + colIdx * (itemWidth + colGap) + itemWidth / 2
+            const x = rowStartX + colIdx * (actualNodeWidth + colGap) + actualNodeWidth / 2
             const y = currentY + row * rowHeight + nodeHeight / 2
             if (it.id) positions.set(it.id, { x, y })
             nodes.push({ ...it, x, y })
@@ -3091,6 +3132,8 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     const calculatedHeight = currentY + padding + 30 // Extra padding to ensure last row is fully visible
     const height = Math.max(availableH, calculatedHeight)
 
-    return { width, height, nodes, positions, headers, nodeWidth: 160, nodeHeight, parentGroups }
+    const baseNodeWidth = 160
+    const nodeWidth = Math.floor(baseNodeWidth * boxWidthScale)
+    return { width, height, nodes, positions, headers, nodeWidth, nodeHeight, parentGroups }
   }
 }

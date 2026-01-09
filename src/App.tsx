@@ -123,6 +123,18 @@ function App() {
       window.removeEventListener('lensesUpdated', handleLensesUpdated)
     }
   }, [])
+
+  // Listen for lens order updates
+  useEffect(() => {
+    function handleLensOrderUpdated() {
+      // Increment lensOrderKey to force re-render of components that depend on lens order
+      setLensOrderKey(k => k + 1)
+    }
+    window.addEventListener('lensOrderUpdated', handleLensOrderUpdated)
+    return () => {
+      window.removeEventListener('lensOrderUpdated', handleLensOrderUpdated)
+    }
+  }, [])
   
   // Reload lenses when returning from settings view
   useEffect(() => {

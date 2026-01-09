@@ -55,6 +55,8 @@ export function Sidebar({ visible, onToggle, onShowAll, onHideAll, onFilterLens,
     }
 
     saveLensOrder(newOrder)
+    // Trigger order change event to notify other components
+    window.dispatchEvent(new CustomEvent('lensOrderUpdated'))
     // Reload lenses to reflect new order
     async function reloadLenses() {
       const dbLenses = await getAllLenses()

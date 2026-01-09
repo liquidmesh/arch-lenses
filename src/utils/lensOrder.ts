@@ -80,17 +80,14 @@ export function getLensOrderSync(): LensKey[] {
     const stored = localStorage.getItem(LENS_ORDER_KEY)
     if (stored) {
       const order = JSON.parse(stored) as LensKey[]
-      // Validate that all lenses are present
-      const allKeys = new Set(LENSES.map(l => l.key))
-      const orderKeys = new Set(order)
-      if (orderKeys.size === allKeys.size && [...orderKeys].every(k => allKeys.has(k))) {
-        return order
-      }
+      // Return the stored order if it exists (validation happens at save time)
+      // This allows the order to work with lenses loaded from the database
+      return order
     }
   } catch (e) {
     // Ignore errors
   }
-  // Return default order
+  // Return default order from static LENSES as fallback
   return LENSES.map(l => l.key)
 }
 

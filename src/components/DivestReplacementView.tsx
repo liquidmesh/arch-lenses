@@ -1757,6 +1757,97 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     svg.setAttribute('height', String(finalHeight))
     bg.setAttribute('height', String(finalHeight))
 
+    // Convert all colors to RGB hex format for PowerPoint compatibility
+    // Helper function to convert HSL to RGB hex
+    function hslToRgbHex(hsl: string): string {
+      // Parse HSL string like "hsl(120, 70%, 85%)"
+      const match = hsl.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/)
+      if (!match) return hsl // Return as-is if not HSL format
+      
+      const h = parseInt(match[1]) / 360
+      const s = parseInt(match[2]) / 100
+      const l = parseInt(match[3]) / 100
+      
+      let r, g, b
+      if (s === 0) {
+        r = g = b = l // achromatic
+      } else {
+        const hue2rgb = (p: number, q: number, t: number) => {
+          if (t < 0) t += 1
+          if (t > 1) t -= 1
+          if (t < 1/6) return p + (q - p) * 6 * t
+          if (t < 1/2) return q
+          if (t < 2/3) return p + (q - p) * (2/3 - t) * 6
+          return p
+        }
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s
+        const p = 2 * l - q
+        r = hue2rgb(p, q, h + 1/3)
+        g = hue2rgb(p, q, h)
+        b = hue2rgb(p, q, h - 1/3)
+      }
+      
+      const toHex = (n: number) => {
+        const hex = Math.round(n * 255).toString(16)
+        return hex.length === 1 ? '0' + hex : hex
+      }
+      
+      return `#${toHex(r)}${toHex(g)}${toHex(b)}`
+    }
+    
+    // Convert all rect fill colors to RGB hex
+    const rectElements = svg.querySelectorAll('rect')
+    rectElements.forEach(rectEl => {
+      // Check both fill attribute and style attribute
+      let fill = rectEl.getAttribute('fill')
+      const style = rectEl.getAttribute('style') || ''
+      
+      // Extract fill from style if not in fill attribute
+      if (!fill && style.includes('fill:')) {
+        const fillMatch = style.match(/fill:\s*([^;]+)/)
+        if (fillMatch) {
+          fill = fillMatch[1].trim()
+        }
+      }
+      
+      if (!fill || fill === 'none' || fill === 'transparent') return
+      
+      let convertedFill = fill
+      
+      // If fill is HSL, convert to RGB hex
+      if (fill.startsWith('hsl(')) {
+        convertedFill = hslToRgbHex(fill)
+      } 
+      // If fill is rgba/rgb, convert to hex
+      else if (fill.includes('rgb')) {
+        const rgbMatch = fill.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)/)
+        if (rgbMatch) {
+          const r = parseInt(rgbMatch[1])
+          const g = parseInt(rgbMatch[2])
+          const b = parseInt(rgbMatch[3])
+          const toHex = (n: number) => {
+            const hex = n.toString(16)
+            return hex.length === 1 ? '0' + hex : hex
+          }
+          convertedFill = `#${toHex(r)}${toHex(g)}${toHex(b)}`
+        }
+      }
+      
+      // Update the fill attribute
+      if (convertedFill !== fill) {
+        rectEl.setAttribute('fill', convertedFill)
+        // Remove fill from style if it exists there
+        if (style.includes('fill:')) {
+          const newStyle = style.replace(/fill:\s*[^;]+;?/g, '').trim()
+          if (newStyle) {
+            rectEl.setAttribute('style', newStyle)
+          } else {
+            rectEl.removeAttribute('style')
+          }
+        }
+      }
+    })
+
     // Serialize to string
     const serializer = new XMLSerializer()
     const svgString = serializer.serializeToString(svg)
@@ -2067,6 +2158,97 @@ export function DivestReplacementView({}: DivestReplacementViewProps) {
     const finalHeight = currentY + padding
     svg.setAttribute('height', String(finalHeight))
     bg.setAttribute('height', String(finalHeight))
+
+    // Convert all colors to RGB hex format for PowerPoint compatibility
+    // Helper function to convert HSL to RGB hex
+    function hslToRgbHex(hsl: string): string {
+      // Parse HSL string like "hsl(120, 70%, 85%)"
+      const match = hsl.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/)
+      if (!match) return hsl // Return as-is if not HSL format
+      
+      const h = parseInt(match[1]) / 360
+      const s = parseInt(match[2]) / 100
+      const l = parseInt(match[3]) / 100
+      
+      let r, g, b
+      if (s === 0) {
+        r = g = b = l // achromatic
+      } else {
+        const hue2rgb = (p: number, q: number, t: number) => {
+          if (t < 0) t += 1
+          if (t > 1) t -= 1
+          if (t < 1/6) return p + (q - p) * 6 * t
+          if (t < 1/2) return q
+          if (t < 2/3) return p + (q - p) * (2/3 - t) * 6
+          return p
+        }
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s
+        const p = 2 * l - q
+        r = hue2rgb(p, q, h + 1/3)
+        g = hue2rgb(p, q, h)
+        b = hue2rgb(p, q, h - 1/3)
+      }
+      
+      const toHex = (n: number) => {
+        const hex = Math.round(n * 255).toString(16)
+        return hex.length === 1 ? '0' + hex : hex
+      }
+      
+      return `#${toHex(r)}${toHex(g)}${toHex(b)}`
+    }
+    
+    // Convert all rect fill colors to RGB hex
+    const rectElements = svg.querySelectorAll('rect')
+    rectElements.forEach(rectEl => {
+      // Check both fill attribute and style attribute
+      let fill = rectEl.getAttribute('fill')
+      const style = rectEl.getAttribute('style') || ''
+      
+      // Extract fill from style if not in fill attribute
+      if (!fill && style.includes('fill:')) {
+        const fillMatch = style.match(/fill:\s*([^;]+)/)
+        if (fillMatch) {
+          fill = fillMatch[1].trim()
+        }
+      }
+      
+      if (!fill || fill === 'none' || fill === 'transparent') return
+      
+      let convertedFill = fill
+      
+      // If fill is HSL, convert to RGB hex
+      if (fill.startsWith('hsl(')) {
+        convertedFill = hslToRgbHex(fill)
+      } 
+      // If fill is rgba/rgb, convert to hex
+      else if (fill.includes('rgb')) {
+        const rgbMatch = fill.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)/)
+        if (rgbMatch) {
+          const r = parseInt(rgbMatch[1])
+          const g = parseInt(rgbMatch[2])
+          const b = parseInt(rgbMatch[3])
+          const toHex = (n: number) => {
+            const hex = n.toString(16)
+            return hex.length === 1 ? '0' + hex : hex
+          }
+          convertedFill = `#${toHex(r)}${toHex(g)}${toHex(b)}`
+        }
+      }
+      
+      // Update the fill attribute
+      if (convertedFill !== fill) {
+        rectEl.setAttribute('fill', convertedFill)
+        // Remove fill from style if it exists there
+        if (style.includes('fill:')) {
+          const newStyle = style.replace(/fill:\s*[^;]+;?/g, '').trim()
+          if (newStyle) {
+            rectEl.setAttribute('style', newStyle)
+          } else {
+            rectEl.removeAttribute('style')
+          }
+        }
+      }
+    })
 
     // Convert SVG to PNG
     const svgString = new XMLSerializer().serializeToString(svg)

@@ -386,8 +386,12 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
     }
   }
 
+  const modalTitle = isNew 
+    ? `Add ${lensLabel(lens)}`
+    : `Edit ${lensLabel(lens)}: ${item?.name || name || '(Untitled)'}`
+
   return (
-    <Modal open={open} onClose={onClose} title={(isNew ? 'Add' : 'Edit') + ' ' + lensLabel(lens)} wide
+    <Modal open={open} onClose={onClose} title={modalTitle} wide
       footer={(
         <>
           <button className="px-3 py-1.5 text-sm rounded border border-slate-300 dark:border-slate-700" onClick={onClose}>Cancel</button>
@@ -594,7 +598,7 @@ export function ItemDialog({ open, onClose, lens, item, onSaved, onOpenMeetingNo
               <div className="mt-2 max-h-40 overflow-auto border border-slate-200 dark:border-slate-800 rounded">
                 {targetItems.map(t => (
                   <button key={t.id} className="block w-full text-left px-2 py-1 hover:bg-slate-50 dark:hover:bg-slate-800" onClick={() => addRelationship(t.id!, t.lens)}>
-                    {t.name}
+                    {t.parent ? `${t.parent}: ${t.name}` : t.name}
                   </button>
                 ))}
               </div>

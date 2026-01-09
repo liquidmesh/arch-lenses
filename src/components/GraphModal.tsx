@@ -66,7 +66,6 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   const [showDetailsBox, setShowDetailsBox] = useState(true)
   const [relatedNotes, setRelatedNotes] = useState<MeetingNote[]>([])
   const [relatedTasks, setRelatedTasks] = useState<Task[]>([])
-  const [relatedItemsMap, setRelatedItemsMap] = useState<Map<number, ItemRecord>>(new Map())
   
   const svgRef = useRef<SVGSVGElement>(null)
   
@@ -110,7 +109,6 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     if (!selectedItemId) {
       setRelatedNotes([])
       setRelatedTasks([])
-      setRelatedItemsMap(new Map())
       return
     }
     
@@ -154,14 +152,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
       })
       
       if (relatedIds.size > 0) {
-        const relatedItems = await db.items.bulkGet(Array.from(relatedIds))
-        const map = new Map<number, ItemRecord>()
-        relatedItems.forEach(item => {
-          if (item) map.set(item.id!, item)
-        })
-        setRelatedItemsMap(map)
-      } else {
-        setRelatedItemsMap(new Map())
+        // Related items are no longer displayed in the popup, so we don't need to load them
       }
     }
     
@@ -1739,13 +1730,21 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
           style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}
         >
         {/* Lens headers */}
-        {layout.headers.map(header => (
-          <g key={header.key}>
-            <rect x={header.x} y={header.y} width={header.width} height={header.height} fill="transparent" stroke="#e2e8f0" />
-            <text x={header.x + header.width / 2} y={header.y + 24} textAnchor="middle" className="fill-slate-700" style={{ fontSize: 14, fontWeight: 600 }}>{header.label}</text>
-            <line x1={header.x} y1={header.y + 32} x2={header.x + header.width} y2={header.y + 32} stroke="white" />
-          </g>
-        ))}
+        {layout.headers.map(header => {
+          // In minimal view with row layout, remove border and separator line
+          const isMinimalRowLayout = viewMode === 'minimal' && layoutMode === 'rows'
+          return (
+            <g key={header.key}>
+              {!isMinimalRowLayout && (
+                <rect x={header.x} y={header.y} width={header.width} height={header.height} fill="transparent" stroke="#e2e8f0" />
+              )}
+              <text x={header.x + header.width / 2} y={header.y + 24} textAnchor="middle" className="fill-slate-700" style={{ fontSize: 14, fontWeight: 600 }}>{header.label}</text>
+              {!isMinimalRowLayout && (
+                <line x1={header.x} y1={header.y + 32} x2={header.x + header.width} y2={header.y + 32} stroke="white" />
+              )}
+            </g>
+          )
+        })}
         {/* Parent group boxes - render before links and nodes so they appear as background */}
         {showParentBoxes && layout.parentGroups && layout.parentGroups.map((group, idx) => (
           <g key={`parent-${group.lens}-${group.parent}-${idx}`}>
@@ -2693,37 +2692,12 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
               </div>
             )}
             
-            {/* Related Items */}
-            {relatedItemsMap.size > 0 && (
-              <div>
-                <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">Related Items</div>
-                <div className="space-y-1">
-                  {Array.from(relatedItemsMap.entries()).map(([itemId, relatedItem]) => {
-                    const rel = rels.find(r => 
-                      (r.fromItemId === selectedItemId && r.toItemId === itemId) ||
-                      (r.toItemId === selectedItemId && r.fromItemId === itemId)
-                    )
-                    return (
-                      <div key={itemId} className="text-slate-600 dark:text-slate-400">
-                        <span className="font-medium">{lensLabel(relatedItem.lens)}:</span> {relatedItem.name}
-                        {rel?.relationshipType && rel.relationshipType !== 'Default' && (
-                          <span className="text-xs text-slate-500 dark:text-slate-500 ml-1">
-                            ({rel.relationshipType})
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-            
             {!selectedItem.description && !selectedItem.lifecycleStatus && !selectedItem.businessContact && 
              !selectedItem.techContact && !selectedItem.primaryArchitect && 
              (!selectedItem.secondaryArchitects || selectedItem.secondaryArchitects.length === 0) &&
              (!selectedItem.tags || selectedItem.tags.length === 0) && !selectedItem.skillsGaps && 
              !selectedItem.parent && (!selectedItem.hyperlinks || selectedItem.hyperlinks.length === 0) &&
-             relatedItemsMap.size === 0 && relatedNotes.length === 0 && relatedTasks.length === 0 && (
+             relatedNotes.length === 0 && relatedTasks.length === 0 && (
               <div className="text-slate-500 dark:text-slate-400 italic">No additional details</div>
             )}
           </div>
@@ -2914,23 +2888,10 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
     // Row layout: lenses as rows
     const rowHeight = nodeHeight + rowGap
     const headerHeight = 30
-    const headerGap = 10 // Gap between header and items
     let currentY = 0
     
     visibleLenses.forEach((l) => {
       const rowItems = items.filter(i => i.lens === l.key)
-      
-      // Position header for this lens (centered)
-      headers.push({
-        key: l.key as LensKey,
-        label: l.label,
-        x: 0,
-        y: currentY,
-        width: availableW,
-        height: headerHeight
-      })
-      
-      currentY += headerHeight + headerGap
       
       // Calculate nodeWidth first (will be used for spacing calculations)
       const baseNodeWidth = 160
@@ -2940,6 +2901,12 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
       // Account for nodeWidth + colGap between items
       const itemsPerRow = Math.max(1, Math.floor((availableW - padding * 2) / (actualNodeWidth + colGap)))
       const itemWidth = Math.floor((availableW - padding * 2 - colGap * (itemsPerRow - 1)) / itemsPerRow)
+      
+      // Store the starting Y position for items (inside the box, after header)
+      // In minimal view with row layout, reduce padding between title and items
+      const boxPadding = (viewMode === 'minimal' && mode === 'rows') ? 2 : 8 // Padding inside the header box around items
+      const itemsStartY = currentY + headerHeight + boxPadding
+      let itemsMaxY = itemsStartY // Track the maximum Y position of items (start at itemsStartY)
       
       if (showParentBoxes) {
         // Group items by parent
@@ -3022,11 +2989,12 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
         }
         
         // Position all boxes (parent boxes and standalone items) in rows, center-aligning each row
-        let maxYInRow = currentY
+        let currentRowY = itemsStartY // Y position for the current row (all boxes in a row share this Y)
+        let maxRowHeight = 0 // Track the maximum height of boxes in the current row
         const currentRowBoxes: Array<{ box: ParentBoxInfo; x: number; y: number }> = []
         
         const flushRow = () => {
-          if (currentRowBoxes.length === 0) return
+          if (currentRowBoxes.length === 0) return maxRowHeight
           
           // Calculate total width of boxes in this row
           const totalRowWidth = currentRowBoxes.reduce((sum, b) => sum + b.box.width, 0) + 
@@ -3035,11 +3003,11 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
           // Center-align the row
           const rowStartX = (availableW - totalRowWidth) / 2
           
-          // Position each box in the centered row
+          // Position each box in the centered row (all at the same Y position)
           let boxX = rowStartX
-          currentRowBoxes.forEach(({ box, y }) => {
+          currentRowBoxes.forEach(({ box }) => {
             const groupX = boxX
-            const groupY = y
+            const groupY = currentRowY // All boxes in the row share the same Y position
             
             if (!box.isStandalone) {
               // Parent box - create parent group
@@ -3078,7 +3046,10 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
             boxX += box.width + parentGroupGap
           })
           
+          const flushedRowHeight = maxRowHeight // Save the height of this row before resetting
           currentRowBoxes.length = 0
+          maxRowHeight = 0 // Reset for next row
+          return flushedRowHeight // Return the height of the row we just flushed
         }
         
         allBoxes.forEach((box) => {
@@ -3088,19 +3059,23 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
              (currentRowBoxes.length - 1) * parentGroupGap + box.width <= availableW - padding * 2)
           
           if (!wouldFit) {
-            flushRow()
-            currentY = maxYInRow + parentGroupGap
-            maxYInRow = currentY
+            // Flush the current row and move to the next row
+            const flushedRowHeight = flushRow()
+            // Move to next row: current row Y + height of flushed row + gap
+            currentRowY = currentRowY + flushedRowHeight + parentGroupGap
           }
           
-          currentRowBoxes.push({ box, x: 0, y: currentY })
-          maxYInRow = Math.max(maxYInRow, currentY + box.height)
+          // Add box to current row (all boxes in a row share the same Y)
+          currentRowBoxes.push({ box, x: 0, y: currentRowY })
+          // Track the maximum height in the current row
+          maxRowHeight = Math.max(maxRowHeight, box.height)
         })
         
-        flushRow()
+        // Flush the last row and get its height
+        const lastRowHeight = flushRow()
         
-        // Update currentY to the bottom of all items
-        currentY = maxYInRow
+        // Update itemsMaxY to the maximum Y position of all items (currentRowY + last row height)
+        itemsMaxY = Math.max(itemsMaxY, currentRowY + lastRowHeight)
       } else {
         // Flat list - no parent grouping
         // Center-align items in each row
@@ -3115,16 +3090,33 @@ function computeLayout(items: ItemRecord[], windowW: number, windowH: number, vi
           
           itemsInRow.forEach((it, colIdx) => {
             const x = rowStartX + colIdx * (actualNodeWidth + colGap) + actualNodeWidth / 2
-            const y = currentY + row * rowHeight + nodeHeight / 2
+            const y = itemsStartY + row * rowHeight + nodeHeight / 2
             if (it.id) positions.set(it.id, { x, y })
             nodes.push({ ...it, x, y })
           })
         }
         
         if (numItemRows > 0) {
-          currentY += numItemRows * rowHeight + 10 // Gap after items
+          itemsMaxY = Math.max(itemsMaxY, itemsStartY + numItemRows * rowHeight)
         }
       }
+      
+      // Calculate the total height needed for the header box
+      const itemsHeight = itemsMaxY - itemsStartY + boxPadding
+      const headerBoxHeight = headerHeight + itemsHeight
+      headers.push({
+        key: l.key as LensKey,
+        label: l.label,
+        x: 0,
+        y: currentY,
+        width: availableW,
+        height: headerBoxHeight
+      })
+      
+      // Update currentY for next lens (add gap between lens boxes)
+      // In minimal view with row layout, remove vertical padding between lens boxes
+      const gapBetweenLenses = (viewMode === 'minimal' && mode === 'rows') ? 0 : 10
+      currentY += headerBoxHeight + gapBetweenLenses
     })
 
     const width = availableW

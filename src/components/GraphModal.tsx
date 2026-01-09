@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { db, getAllLenses } from '../db'
 import { LENSES, type ItemRecord, type LensKey, type RelationshipRecord, type LifecycleStatus, type LensDefinition, type Task, type TeamMember, type MeetingNote } from '../types'
 import { ItemDialog } from './ItemDialog'
@@ -170,11 +170,12 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
   
 
   // Load lenses from database
+  const loadLenses = useCallback(async () => {
+    const dbLenses = await getAllLenses()
+    setLenses(dbLenses.length > 0 ? dbLenses : LENSES)
+  }, [])
+
   useEffect(() => {
-    async function loadLenses() {
-      const dbLenses = await getAllLenses()
-      setLenses(dbLenses.length > 0 ? dbLenses : LENSES)
-    }
     loadLenses()
     
     // Listen for lens updates
@@ -185,7 +186,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     return () => {
       window.removeEventListener('lensesUpdated', handleLensesUpdated)
     }
-  }, [])
+  }, [loadLenses])
 
   // Listen for lens order updates to trigger re-render
   useEffect(() => {
@@ -197,7 +198,7 @@ export function GraphModal({ visible, lensOrderKey, onNavigate: _onNavigate }: G
     return () => {
       window.removeEventListener('lensOrderUpdated', handleLensOrderUpdated)
     }
-  }, [])
+  }, [loadLenses])
 
   // Persist layout mode to localStorage
   useEffect(() => {
